@@ -165,7 +165,7 @@ int fill_scales(const attr_t::arg_scales_t::entry_t &e, dnn_mem_t &mem_dt,
             std::minstd_rand int_seed(idx_start + 1);
             int_seed.discard(1);
 
-            std::uniform_int_distribution<> gen(-2, 2);
+            std::uniform_int_distribution<> gen(-4, -2);
 
             for (int64_t idx = idx_start; idx < idx_end; ++idx) {
                 int pow2 = gen(int_seed);
