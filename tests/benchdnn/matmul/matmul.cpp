@@ -660,7 +660,9 @@ void skip_unimplemented_prb(const prb_t *prb, res_t *res) {
         bool is_grouped = prb->sparse_options.is_grouped(DNNL_ARG_SRC)
                 && prb->sparse_options.is_grouped(DNNL_ARG_DST);
 
-        if (is_grouped && (prb->wtag == "abc" || prb->wtag == "acb")) {
+        if (is_grouped
+                && (prb->wtag == "abx" || prb->wtag == "abc"
+                        || prb->wtag == "acb")) {
             // Allow 3D tags for grouped encoding
         } else {
             BENCHDNN_PRINT(2,
@@ -698,21 +700,6 @@ void skip_unimplemented_prb(const prb_t *prb, res_t *res) {
             return dnnl::impl::utils::one_of(
                     t, dnnl_s4, dnnl_u4, dnnl_s8, dnnl_u8, dnnl_s32);
         };
-
-        // Grouped matmul supports weight-only quantization (fp src + int wei)
-        // when fpmath apply_to_int is set. For regular matmul, and for grouped
-        // without apply_to_int, mixed int/fp src+wei is not supported on CPU.
-        const bool is_grouped_woq = prb->sparse_options.is_grouped(DNNL_ARG_SRC)
-                && !is_int(prb->src_dt()) && is_int(prb->wei_dt())
-                && prb->attr.fpmath_mode.apply_to_int;
-        if (!is_grouped_woq && is_int(prb->src_dt()) != is_int(prb->wei_dt())) {
-            BENCHDNN_PRINT(2,
-                    "[SKIP][%s:%d]: CPU doesn't support mixed integer and "
-                    "floating point source and weights.\n",
-                    __FILE__, __LINE__);
-            res->state = SKIPPED;
-            res->reason = reason_t::skip_not_supported;
-        }
 
         if (!is_int(prb->src_dt()) && !is_int(prb->wei_dt())
                 && is_int(prb->dst_dt())) {
