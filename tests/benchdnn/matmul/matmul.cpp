@@ -749,17 +749,6 @@ void skip_unimplemented_prb(const prb_t *prb, res_t *res) {
             return;
         }
 
-        const int sum_idx = po.find(attr_t::post_ops_t::kind_t::SUM);
-        if (sum_idx != -1 && po.entry[sum_idx].sum.dt != dnnl_data_type_undef) {
-            BENCHDNN_PRINT(2,
-                    "[SKIP][%s:%d]: GPU doesn't support non-default sum_dt "
-                    "argument.\n",
-                    __FILE__, __LINE__);
-            res->state = SKIPPED;
-            res->reason = reason_t::skip_not_supported;
-            return;
-        }
-
         // GPU for x8s8bf16 doesn't support:
         // * Destination zero-point.
         // * Any run-time dimensions.

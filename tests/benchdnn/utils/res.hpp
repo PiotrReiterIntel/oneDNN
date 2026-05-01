@@ -142,6 +142,8 @@ enum class reason_t {
     skip_not_supported,
     // Data type is not supported on the system.
     skip_data_type,
+    // Sum post-op configuration is not supported.
+    skip_postop_sum,
 };
 
 struct res_t {
