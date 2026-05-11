@@ -15,6 +15,7 @@
 *******************************************************************************/
 
 #include <algorithm>
+#include "common/utils.hpp"
 #include "cpu/x64/cpu_isa_traits.hpp"
 #include "cpu/x64/platform.hpp"
 #include "xbyak/xbyak_util.h"
@@ -166,6 +167,21 @@ unsigned get_per_core_cache_size_legacy(int level) {
 }
 
 unsigned get_per_core_cache_size(int level, behavior_t btype) {
+    // Check for env-var override (ONEDNN_CACHE_BEHAVIOR / DNNL_CACHE_BEHAVIOR).
+    // Parsed once at first call; ONEDNN_ takes precedence per library convention.
+    static const auto behavior_override = []() -> std::pair<bool, behavior_t> {
+        const std::string val = getenv_string_user("CACHE_BEHAVIOR");
+        if (val == "min") return {true, behavior_t::min};
+        if (val == "max") return {true, behavior_t::max};
+        if (val == "p_core") return {true, behavior_t::p_core};
+        if (val == "lp_core") return {true, behavior_t::lp_core};
+        if (val == "lpe_core") return {true, behavior_t::lpe_core};
+        if (val == "current") return {true, behavior_t::current};
+        if (val == "legacy") return {true, behavior_t::legacy};
+        return {false, behavior_t::min};
+    }();
+    if (behavior_override.first) btype = behavior_override.second;
+
     // Validate level
     if (level < 1 || level > 3) { return 0; }
 
