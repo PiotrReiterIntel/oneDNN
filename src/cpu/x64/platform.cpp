@@ -87,8 +87,12 @@ size_t find_representative_cpu(Xbyak::util::CoreType target_type,
     return SIZE_MAX; // not found
 }
 
-// Calculate per-core cache size for a specific cache level and CPU index
-// Accounts for cache sharing among logical cores
+// Calculate per-core cache size for a specific cache level and CPU index.
+// Matches the legacy getCoresSharingDataCache semantics: divides by the number
+// of PHYSICAL cores sharing the cache, not logical CPUs.  The legacy Xbyak Cpu
+// path (CPUID leaf 4) uses L1d sharing count as the SMT width and divides it
+// out of every level's logical-CPU sharing count.  We replicate that here so
+// that non-hybrid results are identical to the legacy path.
 uint32_t calculate_per_core_cache(size_t cpu_index, int level) {
     const auto &topo = get_topology_cache().topology;
 
@@ -98,13 +102,19 @@ uint32_t calculate_per_core_cache(size_t cpu_index, int level) {
     const auto &cache = topo.getCache(cpu_index, cache_type);
     if (cache.size == 0) { return 0; }
 
-    // Get number of CPUs sharing this cache
-    size_t sharing_cpus = cache.getSharedCpuNum();
-    if (sharing_cpus == 0) {
-        sharing_cpus = 1; // Assume private cache
-    }
+    // Number of logical CPUs (threads) sharing this cache instance.
+    size_t sharing_logical = cache.getSharedCpuNum();
+    if (sharing_logical == 0) sharing_logical = 1;
 
-    return cache.size / sharing_cpus;
+    // SMT width = logical CPUs sharing L1d (L1 is always private to one
+    // physical core, so this count equals the number of HT threads per core).
+    size_t smt_width = topo.getCache(cpu_index, Xbyak::util::L1d).getSharedCpuNum();
+    if (smt_width == 0) smt_width = 1;
+
+    // Physical cores sharing this cache (mirrors legacy smt_width division).
+    size_t sharing_cores = std::max(sharing_logical / smt_width, size_t(1));
+
+    return cache.size / sharing_cores;
 }
 
 // Probe whether the currently executing CPU has an L3 cache via CPUID leaf 0x4.
