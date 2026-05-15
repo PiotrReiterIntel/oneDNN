@@ -1042,8 +1042,10 @@ void skip_unimplemented_binary_po(const attr_t &attr, res_t *res) {
     if (is_gpu()) {
         const int select_idx = po.find(attr_t::post_ops_t::kind_t::SELECT);
         if (select_idx != -1) {
+            BENCHDNN_PRINTF(2, "%s",
+                    "[SKIP]: Select binary post-op is not supported on GPU");
             res->state = SKIPPED;
-            res->reason = reason_t::skip_not_supported;
+            res->reason = reason_t::skip_postop_binary;
             return;
         }
     }
@@ -1063,8 +1065,9 @@ void skip_unimplemented_prelu_po(
         case dnnl_inner_product:
         case dnnl_matmul: return; break;
         default:
+            BENCHDNN_PRINTF(2, "%s", "[SKIP]: Prelu post-op is not supported");
             res->state = SKIPPED;
-            res->reason = reason_t::skip_not_supported;
+            res->reason = reason_t::skip_postop_prelu;
             break;
     }
 }

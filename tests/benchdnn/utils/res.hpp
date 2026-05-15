@@ -144,6 +144,10 @@ enum class reason_t {
     skip_data_type,
     // Sum post-op configuration is not supported.
     skip_postop_sum,
+    // Binary post-op configuration is not supported.
+    skip_postop_binary,
+    // Prelu post-op configuration is not supported.
+    skip_postop_prelu,
 };
 
 struct res_t {
