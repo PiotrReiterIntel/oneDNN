@@ -59,7 +59,7 @@ __kernel void ref_grouped_gemm_matmul(
 #endif
 #if WITH_WEI_SCALES
         ,
-        __global const float *wei_scales
+        __global const WEI_SCALES_DATA_T *wei_scales
 #endif
                 POST_OP_ARGS) {
 
@@ -93,6 +93,34 @@ __kernel void ref_grouped_gemm_matmul(
     __global DST_DATA_T *dst_group = dst + dst_offset;
 
     ACC_DATA_T acc = (ACC_DATA_T)0;
+#if WITH_WEI_SCALES && WEI_SCALE_GROUP_K > 0
+    // Grouped weight scales: accumulate in blocks of WEI_SCALE_GROUP_K,
+    // applying per-block scale as we go.
+    for (int k0 = 0; k0 < K; k0 += WEI_SCALE_GROUP_K) {
+        ACC_DATA_T block_acc = (ACC_DATA_T)0;
+        const int k_end = min(k0 + WEI_SCALE_GROUP_K, K);
+        for (int k = k0; k < k_end; k++) {
+            const long src_idx = (long)m * K + k;
+#if WEI_TRANSPOSED
+            const long wei_idx = (long)n * K + k;
+#else
+            const long wei_idx = (long)k * N + n;
+#endif
+            ACC_DATA_T src_val = SRC_TO_REF(src_group[src_idx]);
+#if WEI_DT_S4 || WEI_DT_U4
+            ACC_DATA_T wei_val
+                    = WEI_TO_REF(GET_HALF_BYTE(wei, wei_offset + wei_idx));
+#else
+            ACC_DATA_T wei_val = WEI_TO_REF(wei_group[wei_idx]);
+#endif
+            block_acc += src_val * wei_val;
+        }
+        const long ws_idx = (long)group_id * (K / WEI_SCALE_GROUP_K) * N
+                + (long)(k0 / WEI_SCALE_GROUP_K) * N + n;
+        ACC_DATA_T ws = WEI_SCALES_TO_REF(wei_scales[ws_idx]);
+        acc += block_acc * ws;
+    }
+#else
     for (int k = 0; k < K; k++) {
         const long src_idx = (long)m * K + k;
 #if WEI_TRANSPOSED
@@ -101,9 +129,15 @@ __kernel void ref_grouped_gemm_matmul(
         const long wei_idx = (long)k * N + n;
 #endif
         ACC_DATA_T src_val = SRC_TO_REF(src_group[src_idx]);
+#if WEI_DT_S4 || WEI_DT_U4
+        ACC_DATA_T wei_val
+                = WEI_TO_REF(GET_HALF_BYTE(wei, wei_offset + wei_idx));
+#else
         ACC_DATA_T wei_val = WEI_TO_REF(wei_group[wei_idx]);
+#endif
         acc += src_val * wei_val;
     }
+#endif
 
     // Apply row-wise src scale
 #if WITH_SRC_SCALES
@@ -112,11 +146,11 @@ __kernel void ref_grouped_gemm_matmul(
     acc *= (ACC_DATA_T)src_scale;
 #endif
 
-    // Apply column-wise weight scale
-#if WITH_WEI_SCALES
+    // Apply column-wise weight scale (non-grouped)
+#if WITH_WEI_SCALES && WEI_SCALE_GROUP_K == 0
     const long wei_scale_idx = (long)group_id * N + n;
-    const float wei_scale = wei_scales[wei_scale_idx];
-    acc *= (ACC_DATA_T)wei_scale;
+    ACC_DATA_T wei_scale = WEI_SCALES_TO_REF(wei_scales[wei_scale_idx]);
+    acc *= wei_scale;
 #endif
 
 #if WITH_BIAS
