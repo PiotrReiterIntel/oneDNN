@@ -44,6 +44,9 @@ struct ref_sparse_matmul_t : public primitive_t {
             memory_desc_wrapper src_d(src_md());
             memory_desc_wrapper wei_d(weights_md(0));
 
+            VDISPATCH_MATMUL(dst_md()->ndims == 2, VERBOSE_BAD_NDIMS, "dst",
+                    dst_md()->ndims);
+
             VDISPATCH_MATMUL(wei_d.is_sparse_desc() || src_d.is_sparse_desc(),
                     VERBOSE_UNSUPPORTED_SPARSE_CFG);
             VDISPATCH_MATMUL(wei_d.is_sparse_desc() ^ src_d.is_sparse_desc(),
@@ -108,9 +111,9 @@ struct ref_sparse_matmul_t : public primitive_t {
                         format_tag::ab))
                 return false;
             if (src_d.is_sparse_desc())
-                return wei_d.matches_one_of_tag(format_tag::ab);
+                return wei_d.matches_one_of_tag(format_tag::ab, format_tag::ba);
             if (wei_d.is_sparse_desc())
-                return src_d.matches_one_of_tag(format_tag::ab);
+                return src_d.matches_one_of_tag(format_tag::ab, format_tag::ba);
             return false;
         }
 
@@ -146,7 +149,8 @@ struct ref_sparse_matmul_t : public primitive_t {
     void run_csr_kernel(const void *dmat, const void *values,
             const int32_t *indices, const int32_t *pointers, void *res,
             const dim_t M, const dim_t N, const dim_t K,
-            const data_type_t mm_dt, bool is_src_sparse) const;
+            const data_type_t mm_dt, bool is_src_sparse,
+            const dim_t dense_stride0, const dim_t dense_stride1) const;
 
     status_t execute(const exec_ctx_t &ctx) const override;
 
