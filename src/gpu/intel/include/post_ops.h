@@ -29,7 +29,8 @@
 #include "gpu/intel/include/eltwise.h"
 #include "gpu/intel/include/io.h"
 
-float fwd_binary(unsigned algorithm, POST_OP_DATA_T x, POST_OP_DATA_T y) {
+float fwd_binary(
+        unsigned algorithm, POST_OP_DATA_T x, POST_OP_DATA_T y, int cond) {
     switch (algorithm) {
         // binary
         case binary_add: return x + y; break;
@@ -44,6 +45,7 @@ float fwd_binary(unsigned algorithm, POST_OP_DATA_T x, POST_OP_DATA_T y) {
         case binary_lt: return x < y; break;
         case binary_eq: return x == y; break;
         case binary_ne: return x != y; break;
+        case binary_select: return cond ? x : y; break;
         case eltwise_relu: // binary && relu = prelu
             return fwd_eltwise_common(eltwise_relu, x, y, 0.0f, 1.0f);
             break;
@@ -58,7 +60,21 @@ float fwd_binary(unsigned algorithm, POST_OP_DATA_T x, POST_OP_DATA_T y) {
                 = OFF_RMD(CONCAT2(PO_, idx), x0, x1, x2, x3, x4, x5); \
         POST_OP_DATA_T po_src \
                 = load(po_src, (CONCAT3(po, idx, _binary_arg)) + po_off); \
-        acc = fwd_binary(CONCAT3(PO_, idx, _ALG), acc, po_src); \
+        acc = fwd_binary(CONCAT3(PO_, idx, _ALG), acc, po_src, 0); \
+    }
+
+// unused arguments are maintained for interface compatibility
+#define APPLY_PO_TERNARY(idx, acc, _sum_src, x0, x1, x2, x3, x4, x5) \
+    { \
+        const auto po_off \
+                = OFF_RMD(CONCAT2(PO_, idx), x0, x1, x2, x3, x4, x5); \
+        POST_OP_DATA_T po_src \
+                = load(po_src, (CONCAT3(po, idx, _binary_arg)) + po_off); \
+        const auto po2_off \
+                = OFF_RMD(CONCAT2(PO2_, idx), x0, x1, x2, x3, x4, x5); \
+        int po_cond \
+                = load(po_cond, (CONCAT3(po, idx, _binary_arg2)) + po2_off); \
+        acc = fwd_binary(CONCAT3(PO_, idx, _ALG), acc, po_src, po_cond); \
     }
 
 // unused arguments are maintained for interface compatibility
