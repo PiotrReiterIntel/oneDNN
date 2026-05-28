@@ -302,7 +302,7 @@ unsigned get_per_core_cache_size(int level) {
 
 unsigned get_per_core_cache_size_pcore(int level) {
 #if DNNL_X64
-    return x64::platform::get_per_core_cache_size(
+    return x64::platform::get_per_core_cache_size_topology(
             level, x64::platform::behavior_t::p_core);
 #else
     return get_per_core_cache_size(level);
@@ -311,7 +311,7 @@ unsigned get_per_core_cache_size_pcore(int level) {
 
 unsigned get_per_core_cache_size_lp_core(int level) {
 #if DNNL_X64
-    return x64::platform::get_per_core_cache_size(
+    return x64::platform::get_per_core_cache_size_topology(
             level, x64::platform::behavior_t::lp_core);
 #else
     return get_per_core_cache_size(level);
@@ -320,7 +320,7 @@ unsigned get_per_core_cache_size_lp_core(int level) {
 
 unsigned get_per_core_cache_size_lpe_core(int level) {
 #if DNNL_X64
-    return x64::platform::get_per_core_cache_size(
+    return x64::platform::get_per_core_cache_size_topology(
             level, x64::platform::behavior_t::lpe_core);
 #else
     return 0;

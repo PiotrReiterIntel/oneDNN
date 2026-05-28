@@ -108,7 +108,8 @@ uint32_t calculate_per_core_cache(size_t cpu_index, int level) {
 
     // SMT width = logical CPUs sharing L1d (L1 is always private to one
     // physical core, so this count equals the number of HT threads per core).
-    size_t smt_width = topo.getCache(cpu_index, Xbyak::util::L1d).getSharedCpuNum();
+    size_t smt_width
+            = topo.getCache(cpu_index, Xbyak::util::L1d).getSharedCpuNum();
     if (smt_width == 0) smt_width = 1;
 
     // Physical cores sharing this cache (mirrors legacy smt_width division).
@@ -176,6 +177,68 @@ unsigned get_per_core_cache_size_legacy(int level) {
     return 0;
 }
 
+// Inner implementation: resolves btype to a cache size with no env-var override.
+// Called by both get_per_core_cache_size (which may apply the override first)
+// and by topology-info helpers (get_per_core_cache_size_pcore etc.) that must
+// always return true topology values regardless of the active env-var override.
+static unsigned get_per_core_cache_size_for_btype(int level, behavior_t btype) {
+    // Validate level
+    if (level < 1 || level > 3) { return 0; }
+
+#ifdef __APPLE__
+    return get_per_core_cache_size_legacy(level);
+#else
+    if (btype == behavior_t::legacy) {
+        return get_per_core_cache_size_legacy(level);
+    }
+
+    const auto &topo = get_topology_cache().topology;
+
+    if (!topo.isHybrid()) { return calculate_per_core_cache(0, level); }
+
+    size_t pcore_cpu = find_representative_cpu(Xbyak::util::Performance);
+    size_t lp_core_cpu = find_representative_cpu(
+            Xbyak::util::Efficient, l3_filter_t::with_l3);
+    size_t lpe_core_cpu = find_representative_cpu(
+            Xbyak::util::Efficient, l3_filter_t::without_l3);
+
+    if (pcore_cpu == SIZE_MAX) pcore_cpu = 0;
+    if (lp_core_cpu == SIZE_MAX) lp_core_cpu = 0;
+
+    uint32_t pcore_size = calculate_per_core_cache(pcore_cpu, level);
+    uint32_t lp_core_size = calculate_per_core_cache(lp_core_cpu, level);
+    uint32_t lpe_core_size = (lpe_core_cpu != SIZE_MAX)
+            ? calculate_per_core_cache(lpe_core_cpu, level)
+            : 0;
+
+    switch (btype) {
+        case behavior_t::p_core: return pcore_size;
+        case behavior_t::lp_core: return lp_core_size;
+        case behavior_t::lpe_core: return lpe_core_size;
+        case behavior_t::current: {
+            Xbyak::util::CoreType current_ctype = get_core_type();
+            if (current_ctype == Xbyak::util::Performance) return pcore_size;
+            if (lpe_core_cpu != SIZE_MAX && !current_cpu_has_l3())
+                return lpe_core_size;
+            return lp_core_size;
+        }
+        case behavior_t::min: {
+            uint32_t m = (std::min)(pcore_size, lp_core_size);
+            if (lpe_core_cpu != SIZE_MAX && lpe_core_size > 0)
+                m = (std::min)(m, lpe_core_size);
+            return m;
+        }
+        case behavior_t::max: {
+            uint32_t m = (std::max)(pcore_size, lp_core_size);
+            if (lpe_core_cpu != SIZE_MAX && lpe_core_size > 0)
+                m = (std::max)(m, lpe_core_size);
+            return m;
+        }
+        default: return get_per_core_cache_size_legacy(level);
+    }
+#endif
+}
+
 unsigned get_per_core_cache_size(int level, behavior_t btype) {
     // Check for env-var override (ONEDNN_CACHE_BEHAVIOR / DNNL_CACHE_BEHAVIOR).
     // Parsed once at first call; ONEDNN_ takes precedence per library convention.
@@ -192,85 +255,11 @@ unsigned get_per_core_cache_size(int level, behavior_t btype) {
     }();
     if (behavior_override.first) btype = behavior_override.second;
 
-    // Validate level
-    if (level < 1 || level > 3) { return 0; }
+    return get_per_core_cache_size_for_btype(level, btype);
+}
 
-#ifdef __APPLE__
-    // xbyak::util::CpuTopology is not supported on macOS.
-    // Always fall back to legacy CPUID-based behavior.
-    return get_per_core_cache_size_legacy(level);
-#else
-    // Handle legacy behavior
-    if (btype == behavior_t::legacy) {
-        return get_per_core_cache_size_legacy(level);
-    }
-
-    const auto &topo = get_topology_cache().topology;
-
-    // For non-hybrid systems, all cores are the same
-    if (!topo.isHybrid()) {
-        // Use first CPU as representative
-        return calculate_per_core_cache(0, level);
-    }
-
-    // For hybrid systems, find representative CPUs for each core type.
-    // LP E-cores (no L3) are distinguished from regular E-cores (with L3)
-    // purely by L3 presence since xbyak reports both as Efficient.
-    size_t pcore_cpu = find_representative_cpu(Xbyak::util::Performance);
-    size_t lp_core_cpu = find_representative_cpu(
-            Xbyak::util::Efficient, l3_filter_t::with_l3);
-    size_t lpe_core_cpu = find_representative_cpu(
-            Xbyak::util::Efficient, l3_filter_t::without_l3);
-
-    // Fall back to the first CPU when a core type is not present
-    if (pcore_cpu == SIZE_MAX) pcore_cpu = 0;
-    if (lp_core_cpu == SIZE_MAX) lp_core_cpu = 0;
-    // lpe_core_cpu stays SIZE_MAX when there are no LP E-cores — callers
-    // that request lpe_core will get 0 in that case (no such cache level).
-
-    uint32_t pcore_size = calculate_per_core_cache(pcore_cpu, level);
-    uint32_t lp_core_size = calculate_per_core_cache(lp_core_cpu, level);
-    uint32_t lpe_core_size = (lpe_core_cpu != SIZE_MAX)
-            ? calculate_per_core_cache(lpe_core_cpu, level)
-            : 0;
-
-    switch (btype) {
-        case behavior_t::p_core: return pcore_size;
-
-        case behavior_t::lp_core: return lp_core_size;
-
-        // Returns 0 for any cache level that LP E-cores lack (typically L3)
-        case behavior_t::lpe_core: return lpe_core_size;
-
-        case behavior_t::current: {
-            // Determine current core type and return appropriate size.
-            // LP E-cores report as Efficient in CPUID leaf 0x1A; distinguish
-            // them from regular E-cores by probing the current CPU's L3 via
-            // CPUID leaf 0x4, which is per-core on Intel hybrid CPUs.
-            Xbyak::util::CoreType current_ctype = get_core_type();
-            if (current_ctype == Xbyak::util::Performance) return pcore_size;
-            if (lpe_core_cpu != SIZE_MAX && !current_cpu_has_l3())
-                return lpe_core_size;
-            return lp_core_size;
-        }
-
-        case behavior_t::min: {
-            uint32_t m = (std::min)(pcore_size, lp_core_size);
-            if (lpe_core_cpu != SIZE_MAX && lpe_core_size > 0)
-                m = (std::min)(m, lpe_core_size);
-            return m;
-        }
-
-        case behavior_t::max: {
-            uint32_t m = (std::max)(pcore_size, lp_core_size);
-            if (lpe_core_cpu != SIZE_MAX && lpe_core_size > 0)
-                m = (std::max)(m, lpe_core_size);
-            return m;
-        }
-
-        default: return get_per_core_cache_size_legacy(level);
-    }
-#endif // __APPLE__
+unsigned get_per_core_cache_size_topology(int level, behavior_t btype) {
+    return get_per_core_cache_size_for_btype(level, btype);
 }
 
 bool has_lpe_core() {

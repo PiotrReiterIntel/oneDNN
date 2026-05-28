@@ -76,6 +76,12 @@ bool has_lpe_core();
 // by checking for E-cores with no L3 cache.
 unsigned get_per_core_cache_size(int level, behavior_t btype = behavior_t::min);
 
+// Topology-info variant: always returns the true topology value for the given
+// btype, bypassing any active ONEDNN_CACHE_BEHAVIOR env-var override.
+// Use this for diagnostic/verbose output where the topology itself is wanted,
+// not the value that was actually applied to blocking decisions.
+unsigned get_per_core_cache_size_topology(int level, behavior_t btype);
+
 } // namespace platform
 } // namespace x64
 } // namespace cpu
