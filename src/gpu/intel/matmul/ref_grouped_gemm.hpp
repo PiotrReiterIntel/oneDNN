@@ -69,11 +69,9 @@ struct ref_grouped_t : public primitive_t {
             const auto &src_grouped = src_d.sparse_desc().grouped_desc;
             group_count_ = src_grouped.group_count;
 
-            // GPU ref currently only supports matching data types,
-            // or integer/sub-byte weights with float src/dst when
-            // weight scales are provided.
-            const bool matching_dt = src_dt_ == wei_dt_ && src_dt_ == dst_dt_
-                    && utils::one_of(src_dt_, f32, bf16, f16);
+            const bool matching_dt = src_dt_ == wei_dt_
+                    && utils::one_of(
+                            src_dt_, f32, bf16, f16, f8_e5m2, f8_e4m3, f4_e2m1);
             const bool deq_wei = src_dt_ == dst_dt_
                     && utils::one_of(src_dt_, f32, bf16, f16)
                     && utils::one_of(wei_dt_, s4, u4, s8, u8);
@@ -90,14 +88,15 @@ struct ref_grouped_t : public primitive_t {
             if (!attr_scales.has_default_values(DNNL_ARG_SRC)) {
                 const int src_mask = attr_scales.get_mask(DNNL_ARG_SRC);
                 const int rowwise_mask = src_qmask_M();
-                // Only row-wise f32 scales supported for src
-                VDISPATCH_MATMUL(src_mask == rowwise_mask,
-                        VERBOSE_UNSUPPORTED_SCALES_CFG);
-                VDISPATCH_MATMUL(attr_scales.get_data_type(DNNL_ARG_SRC) == f32,
-                        VERBOSE_UNSUPPORTED_SCALES_CFG);
-                // No groups for src scales
+                const int grouped_mask = src_qmask_M() | src_qmask_K();
+                // Row-wise or grouped scales supported for src
                 VDISPATCH_MATMUL(
-                        attr_scales.get(DNNL_ARG_SRC).has_default_groups(),
+                        utils::one_of(src_mask, rowwise_mask, grouped_mask),
+                        VERBOSE_UNSUPPORTED_SCALES_CFG);
+                // f32, f16, or f8_e4m3 scale data types
+                VDISPATCH_MATMUL(
+                        utils::one_of(attr_scales.get_data_type(DNNL_ARG_SRC),
+                                f32, f16, f8_e4m3),
                         VERBOSE_UNSUPPORTED_SCALES_CFG);
             }
             if (!attr_scales.has_default_values(DNNL_ARG_WEIGHTS)) {
@@ -108,10 +107,10 @@ struct ref_grouped_t : public primitive_t {
                 VDISPATCH_MATMUL(
                         utils::one_of(wei_mask, colwise_mask, grouped_mask),
                         VERBOSE_UNSUPPORTED_SCALES_CFG);
-                // f32 or f16 scale data types
+                // f32, f16, or f8_e4m3 scale data types
                 VDISPATCH_MATMUL(utils::one_of(attr_scales.get_data_type(
                                                        DNNL_ARG_WEIGHTS),
-                                         f32, f16),
+                                         f32, f16, f8_e4m3),
                         VERBOSE_UNSUPPORTED_SCALES_CFG);
             }
             VDISPATCH_MATMUL(attr_scales.has_default_values(DNNL_ARG_DST),
@@ -133,6 +132,12 @@ struct ref_grouped_t : public primitive_t {
                                 .has_default_groups()) {
                 wei_scale_group_k_
                         = attr_scales.get(DNNL_ARG_WEIGHTS).get_group(0);
+            }
+
+            // Store src scale group K size
+            if (!attr_scales.has_default_values(DNNL_ARG_SRC)
+                    && !attr_scales.get(DNNL_ARG_SRC).has_default_groups()) {
+                src_scale_group_k_ = attr_scales.get(DNNL_ARG_SRC).get_group(1);
             }
 
             // Initialize binary post-op memory descriptors: grouped dst is
@@ -159,6 +164,7 @@ struct ref_grouped_t : public primitive_t {
         data_type_t wei_dt_ = data_type::undef;
         dim_t group_count_ = 0;
         dim_t wei_scale_group_k_ = 0;
+        dim_t src_scale_group_k_ = 0;
     };
 
     status_t init(impl::engine_t *engine) override {
@@ -189,6 +195,10 @@ struct ref_grouped_t : public primitive_t {
         // Weight scale group size for grouped dequantization
         kernel_ctx.define_int(
                 "WEI_SCALE_GROUP_K", (int)pd()->wei_scale_group_k_);
+
+        // Src scale group size for grouped quantization
+        kernel_ctx.define_int(
+                "SRC_SCALE_GROUP_K", (int)pd()->src_scale_group_k_);
 
         auto attr_info = attr_info_t::create(pd()->attr());
         CHECK(def_attr_info(kernel_ctx, attr_info, pd()->attr()->post_ops_,
