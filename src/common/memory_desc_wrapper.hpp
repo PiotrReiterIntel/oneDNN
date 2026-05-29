@@ -145,8 +145,12 @@ struct memory_desc_wrapper : public c_compatible {
     }
 
     const blocking_desc_t &blocking_desc() const {
-        assert(is_blocking_desc() || is_sparse_packed_desc());
+        assert(is_blocking_desc() || is_sparse_packed_desc()
+                || is_grouped_desc());
         if (!is_sparse_desc()) return md_->format_desc.blocking;
+#if DNNL_EXPERIMENTAL_GROUPED_MEMORY
+        if (is_grouped_desc()) return sparse_desc().grouped_desc.values_desc;
+#endif
         return sparse_desc().packed_desc;
     }
     const wino_desc_t &wino_desc() const {
