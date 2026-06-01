@@ -177,18 +177,18 @@ unsigned get_per_core_cache_size_legacy(int level) {
     return 0;
 }
 
-// Inner implementation: resolves btype to a cache size with no env-var override.
+// Inner implementation: resolves sizing_policy to a cache size with no env-var override.
 // Called by both get_per_core_cache_size (which may apply the override first)
 // and by topology-info helpers (get_per_core_cache_size_pcore etc.) that must
 // always return true topology values regardless of the active env-var override.
-static unsigned get_per_core_cache_size_for_btype(int level, behavior_t btype) {
+static unsigned get_per_core_cache_size_for_btype(int level, cache_sizing_policy_t sizing_policy) {
     // Validate level
     if (level < 1 || level > 3) { return 0; }
 
 #ifdef __APPLE__
     return get_per_core_cache_size_legacy(level);
 #else
-    if (btype == behavior_t::legacy) {
+    if (sizing_policy == cache_sizing_policy_t::legacy) {
         return get_per_core_cache_size_legacy(level);
     }
 
@@ -211,24 +211,24 @@ static unsigned get_per_core_cache_size_for_btype(int level, behavior_t btype) {
             ? calculate_per_core_cache(lpe_core_cpu, level)
             : 0;
 
-    switch (btype) {
-        case behavior_t::p_core: return pcore_size;
-        case behavior_t::lp_core: return lp_core_size;
-        case behavior_t::lpe_core: return lpe_core_size;
-        case behavior_t::current: {
+    switch (sizing_policy) {
+        case cache_sizing_policy_t::p_core: return pcore_size;
+        case cache_sizing_policy_t::lp_core: return lp_core_size;
+        case cache_sizing_policy_t::lpe_core: return lpe_core_size;
+        case cache_sizing_policy_t::current: {
             Xbyak::util::CoreType current_ctype = get_core_type();
             if (current_ctype == Xbyak::util::Performance) return pcore_size;
             if (lpe_core_cpu != SIZE_MAX && !current_cpu_has_l3())
                 return lpe_core_size;
             return lp_core_size;
         }
-        case behavior_t::min: {
+        case cache_sizing_policy_t::min: {
             uint32_t m = (std::min)(pcore_size, lp_core_size);
             if (lpe_core_cpu != SIZE_MAX && lpe_core_size > 0)
                 m = (std::min)(m, lpe_core_size);
             return m;
         }
-        case behavior_t::max: {
+        case cache_sizing_policy_t::max: {
             uint32_t m = (std::max)(pcore_size, lp_core_size);
             if (lpe_core_cpu != SIZE_MAX && lpe_core_size > 0)
                 m = (std::max)(m, lpe_core_size);
@@ -239,27 +239,27 @@ static unsigned get_per_core_cache_size_for_btype(int level, behavior_t btype) {
 #endif
 }
 
-unsigned get_per_core_cache_size(int level, behavior_t btype) {
-    // Check for env-var override (ONEDNN_CACHE_BEHAVIOR / DNNL_CACHE_BEHAVIOR).
+unsigned get_per_core_cache_size(int level, cache_sizing_policy_t sizing_policy) {
+    // Check for env-var override (ONEDNN_CACHE_POLICY / DNNL_CACHE_POLICY).
     // Parsed once at first call; ONEDNN_ takes precedence per library convention.
-    static const auto behavior_override = []() -> std::pair<bool, behavior_t> {
-        const std::string val = getenv_string_user("CACHE_BEHAVIOR");
-        if (val == "min") return {true, behavior_t::min};
-        if (val == "max") return {true, behavior_t::max};
-        if (val == "p_core") return {true, behavior_t::p_core};
-        if (val == "lp_core") return {true, behavior_t::lp_core};
-        if (val == "lpe_core") return {true, behavior_t::lpe_core};
-        if (val == "current") return {true, behavior_t::current};
-        if (val == "legacy") return {true, behavior_t::legacy};
-        return {false, behavior_t::min};
+    static const auto policy_override = []() -> std::pair<bool, cache_sizing_policy_t> {
+        const std::string val = getenv_string_user("CACHE_POLICY");
+        if (val == "min") return {true, cache_sizing_policy_t::min};
+        if (val == "max") return {true, cache_sizing_policy_t::max};
+        if (val == "p_core") return {true, cache_sizing_policy_t::p_core};
+        if (val == "lp_core") return {true, cache_sizing_policy_t::lp_core};
+        if (val == "lpe_core") return {true, cache_sizing_policy_t::lpe_core};
+        if (val == "current") return {true, cache_sizing_policy_t::current};
+        if (val == "legacy") return {true, cache_sizing_policy_t::legacy};
+        return {false, cache_sizing_policy_t::min};
     }();
-    if (behavior_override.first) btype = behavior_override.second;
+    if (policy_override.first) sizing_policy = policy_override.second;
 
-    return get_per_core_cache_size_for_btype(level, btype);
+    return get_per_core_cache_size_for_btype(level, sizing_policy);
 }
 
-unsigned get_per_core_cache_size_topology(int level, behavior_t btype) {
-    return get_per_core_cache_size_for_btype(level, btype);
+unsigned get_per_core_cache_size_topology(int level, cache_sizing_policy_t sizing_policy) {
+    return get_per_core_cache_size_for_btype(level, sizing_policy);
 }
 
 bool has_lpe_core() {

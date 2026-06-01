@@ -36,7 +36,7 @@ bool is_hybrid();
 // Returns Xbyak::util::Performance (P-core) by default on non-hybrid CPUs.
 Xbyak::util::CoreType get_core_type();
 
-enum class behavior_t {
+enum class cache_sizing_policy_t {
     p_core, // Performance core
     lp_core, // Efficiency core (E-core with shared L3)
     lpe_core, // Low-power efficiency core no L3 cache (e.g. Meteor Lake's SoC tile E-core island).
@@ -55,17 +55,17 @@ bool has_lpe_core();
 // This avoids using older CPUID-based methods which can result in inaccurate
 // values on hybrid CPUs.
 //
-// The behavior_t argument specifies the behavior of the query on hybrid CPUs.
-// On non-hybrid CPUs, the behavior_t argument is ignored and the function
+// The cache_sizing_policy_t argument specifies the behavior of the query on hybrid CPUs.
+// On non-hybrid CPUs, the cache_sizing_policy_t argument is ignored and the function
 // returns the per-core cache size as normal.
 //
-// - if behavior_t is p_core/lp_core/lpe_core, the function returns the per-core cache
+// - if cache_sizing_policy_t is p_core/lp_core/lpe_core, the function returns the per-core cache
 //   size for that core type.
-// - if behavior_t is min/max, the function returns the min/max per-core cache
+// - if cache_sizing_policy_t is min/max, the function returns the min/max per-core cache
 //   size among all cores
-// - if behavior_t is current, the function returns the cache size of the core
+// - if cache_sizing_policy_t is current, the function returns the cache size of the core
 //   the calling thread is running on.
-// - if behavior_t is legacy, the function behaves like the legacy
+// - if cache_sizing_policy_t is legacy, the function behaves like the legacy
 //   get_per_core_cache_size(level) function using CPUID with no consideration of
 //   hybrid CPUs.
 //
@@ -74,13 +74,13 @@ bool has_lpe_core();
 // same cache topology, all LPE-cores have the same cache topology. The LPE-core
 // type is a subset of the E-core type, so the presence of LPE-cores is determined
 // by checking for E-cores with no L3 cache.
-unsigned get_per_core_cache_size(int level, behavior_t btype = behavior_t::min);
+unsigned get_per_core_cache_size(int level, cache_sizing_policy_t sizing_policy = cache_sizing_policy_t::min);
 
 // Topology-info variant: always returns the true topology value for the given
-// btype, bypassing any active ONEDNN_CACHE_BEHAVIOR env-var override.
+// sizing_policy, bypassing any active ONEDNN_CACHE_POLICY env-var override.
 // Use this for diagnostic/verbose output where the topology itself is wanted,
 // not the value that was actually applied to blocking decisions.
-unsigned get_per_core_cache_size_topology(int level, behavior_t btype);
+unsigned get_per_core_cache_size_topology(int level, cache_sizing_policy_t sizing_policy);
 
 } // namespace platform
 } // namespace x64

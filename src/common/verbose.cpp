@@ -111,20 +111,20 @@ void print_header() noexcept {
         verbose_printf("info,cpu,isa:%s\n", cpu::platform::get_isa_info());
         if (cpu::platform::is_hybrid_cpu()) {
             verbose_printf(
-                    "info,cpu,per_core_cache,pcore:L1d:%uKiB,L2:%uKiB,L3:%"
-                    "uKiB\n",
+                    "info,cpu,per_core_cache,pcore:L1d:%uKB,L2:%uKB,L3:%"
+                    "uKB\n",
                     cpu::platform::get_per_core_cache_size_pcore(1) / 1024,
                     cpu::platform::get_per_core_cache_size_pcore(2) / 1024,
                     cpu::platform::get_per_core_cache_size_pcore(3) / 1024);
             verbose_printf(
-                    "info,cpu,per_core_cache,lp_core:L1d:%uKiB,L2:%uKiB,L3:%"
-                    "uKiB\n",
+                    "info,cpu,per_core_cache,lp_core:L1d:%uKB,L2:%uKB,L3:%"
+                    "uKB\n",
                     cpu::platform::get_per_core_cache_size_lp_core(1) / 1024,
                     cpu::platform::get_per_core_cache_size_lp_core(2) / 1024,
                     cpu::platform::get_per_core_cache_size_lp_core(3) / 1024);
             if (cpu::platform::has_lpe_core_cpu()) {
                 verbose_printf(
-                        "info,cpu,per_core_cache,lpe_core:L1d:%uKiB,L2:%uKiB\n",
+                        "info,cpu,per_core_cache,lpe_core:L1d:%uKB,L2:%uKB\n",
                         cpu::platform::get_per_core_cache_size_lpe_core(1)
                                 / 1024,
                         cpu::platform::get_per_core_cache_size_lpe_core(2)
@@ -132,20 +132,20 @@ void print_header() noexcept {
             }
         } else {
             verbose_printf(
-                    "info,cpu,per_core_cache:L1d:%uKiB,L2:%uKiB,L3:%uKiB\n",
+                    "info,cpu,per_core_cache:L1d:%uKB,L2:%uKB,L3:%uKB\n",
                     cpu::platform::get_per_core_cache_size(1) / 1024,
                     cpu::platform::get_per_core_cache_size(2) / 1024,
                     cpu::platform::get_per_core_cache_size(3) / 1024);
         }
-        // If ONEDNN_CACHE_BEHAVIOR is set, all call sites use the same override
+        // If ONEDNN_CACHE_POLICY is set, all call sites use the same override
         // policy. Emit a cache_budget line showing the effective values so a
         // reader of the log can see exactly what the blocking heuristics used.
         {
-            const std::string policy = getenv_string_user("CACHE_BEHAVIOR");
+            const std::string policy = getenv_string_user("CACHE_POLICY");
             if (!policy.empty()) {
                 verbose_printf(
-                        "info,cpu,cache_budget,policy=%s:L1d:%uKiB,L2:%uKiB"
-                        ",L3:%uKiB\n",
+                        "info,cpu,cache_budget,policy=%s:L1d:%uKB,L2:%uKB"
+                        ",L3:%uKB\n",
                         policy.c_str(),
                         cpu::platform::get_per_core_cache_size(1) / 1024,
                         cpu::platform::get_per_core_cache_size(2) / 1024,
