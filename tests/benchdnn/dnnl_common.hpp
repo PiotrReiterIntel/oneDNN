@@ -24,7 +24,7 @@
 #include <vector>
 #include <unordered_map>
 
-#include "oneapi/dnnl/dnnl.h"
+#include "oneapi/dnnl/dnnl.hpp"
 
 #include "common.hpp"
 #include "dnn_types.hpp"
@@ -100,15 +100,16 @@ extern int num_streams;
 struct engine_t {
     engine_t(dnnl_engine_kind_t engine_kind);
     engine_t(dnnl_engine_t engine);
+    engine_t(const dnnl::engine &engine);
     engine_t(const engine_t &other);
-    ~engine_t();
-    operator dnnl_engine_t() const { return engine_; }
+    operator dnnl_engine_t() const { return engine_.get(); }
+    operator const dnnl::engine &() const { return engine_; }
     dnnl_engine_kind_t get_kind() const;
 
 private:
     engine_t &operator=(engine_t &other) = delete;
-    dnnl_engine_t engine_;
-    bool is_owner_;
+    dnnl::engine engine_;
+    bool recreate_on_copy_;
 };
 
 struct stream_t {
