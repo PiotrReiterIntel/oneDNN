@@ -37,7 +37,7 @@
 #endif
 
 #if DNNL_CPU_THREADING_RUNTIME == DNNL_RUNTIME_THREADPOOL
-#include "oneapi/dnnl/dnnl_threadpool.h"
+#include "oneapi/dnnl/dnnl_threadpool.hpp"
 #endif
 
 // Uses only publicly available types.
@@ -1923,26 +1923,22 @@ dnnl_engine_kind_t engine_t::get_kind() const {
 }
 
 stream_t::stream_t(const engine_t &engine, void *interop_obj) {
-    dnnl_engine_t eng = engine;
+    const dnnl::engine &eng = engine;
 #if DNNL_CPU_THREADING_RUNTIME == DNNL_RUNTIME_THREADPOOL
-    if (is_cpu(eng)) {
+    if (is_cpu(engine)) {
         auto tp = static_cast<dnnl::threadpool_interop::threadpool_iface *>(
                 interop_obj);
         if (tp == nullptr) tp = dnnl::testing::get_threadpool();
-        dnnl_stream_t stream = nullptr;
-        SAFE_V(dnnl_threadpool_interop_stream_create(&stream, eng, tp));
-        stream_.reset(stream);
+        stream_ = dnnl::threadpool_interop::make_stream(eng, tp);
         return;
     }
 #endif
 
     const bool use_profiling = has_bench_mode_bit(mode_bit_t::perf)
-            && is_gpu(eng) && !is_nvidia_gpu(eng) && !is_amd_gpu(eng);
-    dnnl_stream_flags_t flags
-            = stream_kind2stream_flags(stream_kind, use_profiling);
-    dnnl_stream_t stream = nullptr;
-    DNN_SAFE_V(dnnl_stream_create(&stream, eng, flags));
-    stream_.reset(stream);
+            && is_gpu(engine) && !is_nvidia_gpu(engine) && !is_amd_gpu(engine);
+    const auto flags = static_cast<dnnl::stream::flags>(
+            stream_kind2stream_flags(stream_kind, use_profiling));
+    stream_ = dnnl::stream(eng, flags);
 }
 
 float reorder_rescale_factor() {
