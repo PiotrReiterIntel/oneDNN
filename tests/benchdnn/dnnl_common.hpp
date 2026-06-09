@@ -33,6 +33,7 @@
 #include "utils/compare.hpp"
 #include "utils/dims.hpp"
 #include "utils/dnnl_query.hpp"
+#include "utils/engine.hpp"
 #include "utils/fill.hpp"
 #include "utils/impl_filter.hpp"
 #include "utils/numeric.hpp"
@@ -42,40 +43,6 @@
 
 #define for_ for
 
-#define DNN_SAFE(f, s) \
-    do { \
-        dnnl_status_t status__ = f; \
-        if (status__ != dnnl_success) { \
-            if ((s) == CRIT || (s) == WARN) { \
-                BENCHDNN_PRINT(0, \
-                        "Error: Function '%s' at (%s:%d) returned '%s'\n", \
-                        __FUNCTION__, __FILE__, __LINE__, \
-                        status2str(status__)); \
-                fflush(0); \
-                if ((s) == CRIT) exit(2); \
-            } \
-            return FAIL; \
-        } \
-    } while (0)
-
-#define DNN_SAFE_V(f) \
-    do { \
-        dnnl_status_t status__ = (f); \
-        if (status__ != dnnl_success) { \
-            BENCHDNN_PRINT(0, \
-                    "Error: Function '%s' at (%s:%d) returned '%s'\n", \
-                    __FUNCTION__, __FILE__, __LINE__, status2str(status__)); \
-            fflush(0); \
-            exit(2); \
-        } \
-    } while (0)
-
-// Unlike `DNN_SAFE` this one returns `dnnl_status_t`, not `OK/FAIL`.
-#define DNN_SAFE_STATUS(f) \
-    do { \
-        dnnl_status_t status__ = (f); \
-        if (status__ != dnnl_success) { return status__; } \
-    } while (0)
 
 #ifndef DNNL_EXPERIMENTAL_PROFILING
 #if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL \
@@ -91,29 +58,9 @@ extern "C" dnnl_status_t dnnl_query_profiling_data(dnnl_stream_t stream,
 int check_pd_cache(const_dnnl_primitive_desc_t pd, res_t *res);
 int check_primitive_cache(dnnl_primitive_t p, res_t *res);
 
-extern dnnl_engine_kind_t engine_tgt_kind;
-extern size_t engine_index;
 extern isa_hints_t hints;
 extern int default_num_streams;
 extern int num_streams;
-
-struct engine_t {
-    engine_t(dnnl_engine_kind_t engine_kind);
-    engine_t(dnnl_engine_t engine);
-    engine_t(const dnnl::engine &engine);
-    engine_t(const engine_t &other);
-    operator dnnl_engine_t() const { return engine_.get(); }
-    operator const dnnl::engine &() const { return engine_; }
-
-    bool is_cpu() const;
-    bool is_gpu() const;
-
-private:
-    dnnl::engine::kind get_kind() const;
-    engine_t &operator=(engine_t &other) = delete;
-    dnnl::engine engine_;
-    bool recreate_on_copy_;
-};
 
 struct stream_t {
     stream_t() = default;
@@ -543,7 +490,7 @@ int init_prim(benchdnn_dnnl_wrapper_t<dnnl_primitive_t> &user_prim,
         // where CPU and GPU engines are re-created because this is a commonly
         // used scenario in the frameworks.
         // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-        engine_t engine(get_test_engine());
+        engine_t engine(get_test_engine(), /* recreate_on_copy = */ true);
 
         // The first primitive creation using a temporary engine.
         SAFE(create_primitive(primw, engine, init_pd_func, prb, res, dir, hint,
