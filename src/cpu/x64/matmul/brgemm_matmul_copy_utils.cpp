@@ -2505,7 +2505,16 @@ protected:
                 = one_of(conf_->wei_dt, data_type::bf16, data_type::f16);
 
         switch (dt) {
-            case data_type::s32: vmovdqu32(vmm_in, op); break;
+            case data_type::s32:
+                // `vmovdqu32` is EVEX-only. On non-AVX512 ISAs (e.g. AVX2),
+                // `maybe_mask` returns a plain Ymm/Xmm without a k-mask, but
+                // emitting `vmovdqu32` still requires EVEX and SIGILLs at
+                // runtime. Fall back to a VEX-encoded load on non-masked ISAs.
+                if (isa_has_masks(conf_->isa))
+                    vmovdqu32(vmm_in, op);
+                else
+                    uni_vmovups(vmm_in, op);
+                break;
             case data_type::f32: {
                 if (conf_->transposed_B)
                     vmovdqu8(vmm_in, op);
