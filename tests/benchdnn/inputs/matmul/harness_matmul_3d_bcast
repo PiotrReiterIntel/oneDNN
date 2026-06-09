@@ -37,3 +37,35 @@
 --wtag=any 128x1x64:1x64x16
 --wtag=acb 26x1x64:1x64x65
 --wtag=acb 26x2x64:26x64x65
+
+# 3D / 4D per-batch wei scales (mask covers K+N) with grouping over K.
+--reset
+--dt=f32:s4:f32
+--stag=abx --wtag=abx,any,acb --dtag=abx
+--attr-fpmath=strict:true
+--attr-scales=wei:per_tensor:f32:64x1
+4x208x512:4x512x748
+1x208x512:4x512x748
+4x208x64:1x64x748
+1x208x64:1x64x748
+
+--reset
+--dt=f32:s4:f32
+--stag=abx --wtag=abx --dtag=abx
+--attr-fpmath=strict:true
+--attr-scales=wei:per_tensor:f32:64x1
+2x2x208x512:2x2x512x748
+1x2x208x512:2x2x512x748
+2x2x208x64:1x2x64x748
+1x1x208x64:1x1x64x748
+
+# 3D / 4D per-batch wei zero-points combined with grouped wei scales.
+--reset
+--dt=u8:s8:s32
+--stag=abx --wtag=abx,acb,any --dtag=abx
+--attr-scales=wei:per_tensor:f32:64x1
+--attr-zero-points=wei:per_oc,wei:per_oc:s4
+4x208x512:4x512x748
+1x208x512:4x512x748
+4x208x64:1x64x748
+1x208x64:1x64x748
