@@ -695,18 +695,16 @@ void prb_t::skip_unimplemented(res_t *res) const {
             return;
         }
 
-        auto is_int = [](dnnl_data_type_t t) {
-            return dnnl::impl::utils::one_of(
-                    t, dnnl_s4, dnnl_u4, dnnl_s8, dnnl_u8, dnnl_s32);
-        };
-
         // Grouped matmul supports weight-only quantization (fp src + int wei)
         // when fpmath apply_to_int is set. For regular matmul, and for grouped
         // without apply_to_int, mixed int/fp src+wei is not supported on CPU.
         const bool is_grouped_woq = prb->sparse_options.is_grouped(DNNL_ARG_SRC)
-                && !is_int(prb->src_dt()) && is_int(prb->wei_dt())
+                && !is_integral_dt(prb->src_dt())
+                && is_integral_dt(prb->wei_dt())
                 && prb->attr.fpmath_mode.apply_to_int;
-        if (!is_grouped_woq && is_int(prb->src_dt()) != is_int(prb->wei_dt())) {
+        if (!is_grouped_woq
+                && is_integral_dt(prb->src_dt())
+                        != is_integral_dt(prb->wei_dt())) {
             BENCHDNN_PRINT(2,
                     "[SKIP][%s:%d]: CPU doesn't support mixed integer and "
                     "floating point source and weights.\n",
@@ -715,8 +713,8 @@ void prb_t::skip_unimplemented(res_t *res) const {
             res->reason = reason_t::skip_not_supported;
         }
 
-        if (!is_int(prb->src_dt()) && !is_int(prb->wei_dt())
-                && is_int(prb->dst_dt())) {
+        if (!is_integral_dt(prb->src_dt()) && !is_integral_dt(prb->wei_dt())
+                && is_integral_dt(prb->dst_dt())) {
             BENCHDNN_PRINT(2,
                     "[SKIP][%s:%d]: CPU doesn't support integer destination "
                     "with  floating point source and weights.\n",
@@ -798,10 +796,11 @@ void prb_t::skip_unimplemented(res_t *res) const {
             return;
         }
 
-        if ((dnnl::impl::utils::one_of(
-                     dnnl_f8_e4m3, prb->src_dt(), prb->wei_dt(), prb->dst_dt())
-                    || dnnl::impl::utils::one_of(dnnl_f8_e5m2, prb->src_dt(),
-                            prb->wei_dt(), prb->dst_dt()))
+        const auto has_dt = [&](dnnl_data_type_t dt) {
+            return prb->src_dt() == dt || prb->wei_dt() == dt
+                    || prb->dst_dt() == dt;
+        };
+        if ((has_dt(dnnl_f8_e4m3) || has_dt(dnnl_f8_e5m2))
                 && (!po.is_def() || !prb->attr.scales.is_def())) {
             BENCHDNN_PRINT(2,
                     "[SKIP][%s:%d]: GPU supports fp8 through ref only on "
@@ -812,8 +811,7 @@ void prb_t::skip_unimplemented(res_t *res) const {
             return;
         }
 
-        if (dnnl::impl::utils::one_of(
-                    dnnl_f4_e2m1, prb->src_dt(), prb->wei_dt(), prb->dst_dt())
+        if (has_dt(dnnl_f4_e2m1)
                 && (!po.is_def() || !prb->attr.scales.is_def())) {
             BENCHDNN_PRINT(2,
                     "[SKIP][%s:%d]: GPU supports fp4 through ref only on "

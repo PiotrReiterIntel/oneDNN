@@ -40,8 +40,6 @@
 #include "utils/parallel.hpp"
 #include "utils/prb.hpp"
 
-#include "tests/test_thread.hpp"
-
 #define for_ for
 
 

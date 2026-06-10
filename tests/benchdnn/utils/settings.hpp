@@ -18,6 +18,8 @@
 #ifndef UTILS_SETTINGS_HPP
 #define UTILS_SETTINGS_HPP
 
+#include "tests/thread_context.hpp"
+
 #include "utils/impl_filter.hpp"
 
 struct base_settings_t {
