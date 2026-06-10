@@ -210,27 +210,31 @@ status_t brgemm_matmul_t<isa>::pd_t::init(engine_t *engine) {
             ok = ok && one_of(asc.get_data_type(DNNL_ARG_WEIGHTS), undef, f32);
             ok = ok && one_of(asc.get_data_type(DNNL_ARG_DST), undef, f32);
         }
-        // This impl doesn't support scales over any batch dimensions.
+        // This impl doesn't support scales over batch dimensions for
+        // non-grouped scales.
         if (!asc.has_default_values(DNNL_ARG_WEIGHTS)) {
             const auto mask = asc.get_mask(DNNL_ARG_WEIGHTS);
             const int kn_mask = wei_qmask_N() + wei_qmask_K();
             const bool scale_over_batch = (mask & kn_mask) != mask;
-            if (scale_over_batch && batch() > 1) ok = false;
+            const bool is_grouped
+                    = !asc.get(DNNL_ARG_WEIGHTS).has_default_groups();
+            if (scale_over_batch && batch() > 1 && !is_grouped) ok = false;
         }
         // Implementation has limited support w.r.t. scales groups.
         if (!asc.has_default_values(DNNL_ARG_WEIGHTS)) {
             if (!asc.get(DNNL_ARG_WEIGHTS).has_default_groups()) {
                 // Only grouping over K is supported.
                 ok = ok && asc.get_group(DNNL_ARG_WEIGHTS, 1) == 1;
-                // Only 'per_ocic' mask is supported, but not 'per_tensor' in
-                // benchdnn terms. In numbers, it's '12' is supported while for
-                // 4D '15' is required.
+                // K and N mask bits must be set for grouped scales.
+                // Additional batch bits are allowed and map to per-batch scale
+                // planes in 3D/4D cases.
                 const int mask = asc.get_mask(DNNL_ARG_WEIGHTS);
                 const int ndims = weights_md_.ndims;
                 const int last_dim = (1 << (ndims - 1));
                 const int prelast_dim = (1 << (ndims - 2));
-                const bool mask_ok = (mask & ~(last_dim | prelast_dim)) == 0;
-                ok = ok && mask_ok;
+                const bool has_kn = (mask & (last_dim | prelast_dim))
+                        == (last_dim | prelast_dim);
+                ok = ok && has_kn;
             }
         }
         return ok;
@@ -251,8 +255,13 @@ status_t brgemm_matmul_t<isa>::pd_t::init(engine_t *engine) {
             if (allow_multiple_wei_zp) {
                 const auto kn_mask = wei_qmask_N() + wei_qmask_K();
                 const bool zp_over_batch = (mask & kn_mask) != mask;
-                const bool mask_ok = (mask & ~kn_mask) == 0;
-                return !(zp_over_batch && batch() > 1) && mask_ok;
+                const bool is_grouped
+                        = !zp.get(DNNL_ARG_WEIGHTS).has_default_groups();
+                const bool mask_ok
+                        = IMPLICATION(is_grouped, (mask & kn_mask) == kn_mask)
+                        && IMPLICATION(!is_grouped, (mask & ~kn_mask) == 0);
+                return !(zp_over_batch && batch() > 1 && !is_grouped)
+                        && mask_ok;
             } else {
                 return mask == 0;
             }
@@ -798,7 +807,7 @@ void brgemm_matmul_t<isa>::compute_kernel(
                     static_cast<const void *>(zp_comp_b),
                     brgmm_ctx.get_zp_c_ptr(), false, 1, false, false,
                     brgmm_ctx.get_src_scales_ptr(),
-                    brgmm_ctx.get_wei_scales_ptr(n),
+                    brgmm_ctx.get_wei_scales_ptr(b_idx, 0, n),
                     brgmm_ctx.get_dst_scales_inv_ptr(ithr)};
             brgemm_kernel_execute_postops(brg_kernel, gemm_batch, addr_batch,
                     (void *)ptr_C, (void *)ptr_D, post_ops_data, scratch,
@@ -854,7 +863,7 @@ void brgemm_matmul_t<isa>::compute_kernel(
                     static_cast<const void *>(zp_comp_b),
                     brgmm_ctx.get_zp_c_ptr(), false, 1, false, false,
                     brgmm_ctx.get_src_scales_ptr(),
-                    brgmm_ctx.get_wei_scales_ptr(n),
+                    brgmm_ctx.get_wei_scales_ptr(b_idx, 0, n),
                     brgmm_ctx.get_dst_scales_inv_ptr(ithr)};
 
             brgemm_kernel_execute_postops(brg_kernel_k_tail, 1, addr_batch,
@@ -1195,7 +1204,7 @@ void brgemm_matmul_t<isa>::maybe_reduce_partial_results_and_apply_postops(
                             static_cast<const void *>(zp_comp_b),
                             brgmm_ctx.get_zp_c_ptr(), skip_accumulation, 1,
                             false, false, brgmm_ctx.get_src_scales_ptr(),
-                            brgmm_ctx.get_wei_scales_ptr(n),
+                            brgmm_ctx.get_wei_scales_ptr(b, 0, n),
                             brgmm_ctx.get_dst_scales_inv_ptr(ithr)};
 
                     brgemm_kernel_execute_postops(brg_kernel, 0, nullptr,
@@ -1334,8 +1343,8 @@ void brgemm_matmul_t<isa>::copy_b_chunk_in_buffer(
         ctx.current_K_iters = k_iters;
         ctx.current_K_pad = brgmm_ctx.get_current_K_pad(k_iters);
         ctx.src_scales_ptr = brgmm_ctx.get_src_scales_ptr();
-        ctx.wei_scales_ptr = brgmm_ctx.get_wei_scales_ptr(n, k);
-        ctx.zp_b_value_ptr = brgmm_ctx.get_wei_zp_ptr(n, k);
+        ctx.wei_scales_ptr = brgmm_ctx.get_wei_scales_ptr(b_idx, k, n);
+        ctx.zp_b_value_ptr = brgmm_ctx.get_wei_zp_ptr(b_idx, k, n);
         if (bgmmc.blocked_B && !bgmmc.is_f16_with_int_wei
                 && isa == avx512_core_fp16) {
             cvt_float16_to_float((float *)ctx.tr_src, (float16_t *)ctx.src,
@@ -2126,13 +2135,19 @@ struct brgemm_matmul_t<isa>::brg_matmul_exec_ctx_t {
 
     // Returns a pointer to the weights scales for the correspondent block based
     // on @p n and @p k.
-    const void *get_wei_scales_ptr(dim_t n, dim_t k = 0) const {
+    const void *get_wei_scales_ptr(
+            dim_t b_idx = 0, dim_t k = 0, dim_t n = 0) const {
         if (bgmmc_.is_wei_scale_common) return wei_scales_;
         auto offset = n;
         if (bgmmc_.is_wei_scale_per_k) {
             const auto &k_group_sz = bgmmc_.wei_scales_k_gsize;
             const auto k_idx = k / k_group_sz;
             offset += k_idx * bgmmc_.N;
+        }
+
+        if (bgmmc_.wei_scales_batch_stride > 0) {
+            const int b = get_bb_idx(b_idx, bgmmc_.bcast_B_desc);
+            offset += b * bgmmc_.wei_scales_batch_stride;
         }
 
         offset = offset * bgmmc_.wei_scales_dt_sz;
@@ -2164,7 +2179,8 @@ struct brgemm_matmul_t<isa>::brg_matmul_exec_ctx_t {
         return -cpu::io::load_int_value(bgmmc_.wei_zp_dt, wei_zp_ptr_, 0);
     }
 
-    const void *get_wei_zp_ptr(dim_t n, dim_t k = 0) const {
+    const void *get_wei_zp_ptr(
+            dim_t b_idx = 0, dim_t k = 0, dim_t n = 0) const {
         if (!bgmmc_.has_zero_point_b) return nullptr;
         if (bgmmc_.is_wei_zp_common)
             return wei_zp_ptr_; // single zero point value
@@ -2175,6 +2191,11 @@ struct brgemm_matmul_t<isa>::brg_matmul_exec_ctx_t {
             const auto &k_group_sz = bgmmc_.wei_zp_k_gsize;
             const auto k_idx = k / k_group_sz;
             offset += k_idx * bgmmc_.N;
+        }
+
+        if (bgmmc_.wei_zp_batch_stride > 0) {
+            const int b = get_bb_idx(b_idx, bgmmc_.bcast_B_desc);
+            offset += b * bgmmc_.wei_zp_batch_stride;
         }
 
         const auto dt_sz = types::data_type_size(bgmmc_.wei_zp_dt);

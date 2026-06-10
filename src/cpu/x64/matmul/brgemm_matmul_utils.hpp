@@ -263,6 +263,9 @@ struct brgemm_matmul_conf_t {
     bool is_wei_scale_common = false;
     dim_t wei_scales_k_gsize = 0;
     data_type_t wei_scales_dt = data_type::undef;
+    // This is innermost batch stride for wei scales,
+    // regardless the number of batch dims specified.
+    dim_t wei_scales_batch_stride = 0;
 
     // Zero points
     bool has_zero_point_a;
@@ -279,6 +282,9 @@ struct brgemm_matmul_conf_t {
     bool is_wei_zp_per_n = false;
     bool is_wei_zp_common = false;
     data_type_t wei_zp_dt = data_type::undef;
+    // This is innermost batch stride for wei zero points,
+    // regardless the number of batch dims specified.
+    dim_t wei_zp_batch_stride = 0;
 
     dim_t zp_a_comp_shift_n;
     dim_t zp_a_comp_elems_per_thr;
