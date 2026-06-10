@@ -342,12 +342,12 @@ inline int fetch_impl(benchdnn_dnnl_wrapper_t<dnnl_primitive_desc_t> &pdw,
 // This is an internal to `init_prim` function that utilizes the logic of
 // creating a `pd` and `prim` and assign them to input wrappers. It allows to
 // remove code duplication and keep all the logic in a single place.
-template <typename func_t, typename prb_t>
-int create_primitive(benchdnn_dnnl_wrapper_t<dnnl_primitive_t> &primw,
-        dnnl_engine_t engine, const func_t &init_pd_func, const prb_t *prb,
-        res_t *res, dir_t dir, const_dnnl_primitive_desc_t hint,
-        bool is_service_prim, const_dnnl_memory_desc_t src_md,
-        bool force_f32_dt, bool is_graph_ref = false) {
+inline int create_primitive(benchdnn_dnnl_wrapper_t<dnnl_primitive_t> &primw,
+        dnnl_engine_t engine, dnnl_status_t (*init_pd_func)(init_pd_args_t &),
+        const base_prb_t *prb, res_t *res, dir_t dir,
+        const_dnnl_primitive_desc_t hint, bool is_service_prim,
+        const_dnnl_memory_desc_t src_md, bool force_f32_dt,
+        bool is_graph_ref = false) {
     dnnl_status_t status = dnnl_success;
     dnnl_primitive_t prim {};
 
