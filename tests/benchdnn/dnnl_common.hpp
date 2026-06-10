@@ -403,17 +403,16 @@ inline int create_primitive(benchdnn_dnnl_wrapper_t<dnnl_primitive_t> &primw,
     return OK;
 }
 
-template <typename func_t, typename prb_t>
-int check_pd_w_and_wo_attr(dnnl_engine_t engine, const func_t &init_pd_func,
-        const prb_t *prb, res_t *res, dir_t dir,
-        const_dnnl_primitive_desc_t hint) {
+inline int check_pd_w_and_wo_attr(dnnl_engine_t engine,
+        dnnl_status_t (*init_pd_func)(init_pd_args_t &), const base_prb_t *prb,
+        res_t *res, dir_t dir, const_dnnl_primitive_desc_t hint) {
 
     if (!attr_same_pd_check || prb->attr.is_def()) return OK;
 
     if (prb->attr.post_ops.convolution_index() != -1) return OK;
 
     // Check that adding attributes doesn't cause a fall back to another impl.
-    auto *prb_mutable = const_cast<prb_t *>(prb);
+    auto *prb_mutable = const_cast<base_prb_t *>(prb);
     auto old_attr = prb_mutable->attr;
     prb_mutable->attr = attr_t();
     init_pd_args_t init_pd_args_without_attr(
