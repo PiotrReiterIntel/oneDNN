@@ -138,6 +138,11 @@ engine_t::engine_t(const engine_t &other, bool recreate_on_copy) {
 }
 
 dnnl::engine::kind engine_t::get_kind() const {
+    // An empty engine (e.g., a host scalar memory carries no engine) reports
+    // `any` kind to match the historical default and to avoid querying a null
+    // handle.
+    if (engine_.get(/* allow_empty = */ true) == nullptr)
+        return dnnl::engine::kind::any;
     return engine_.get_kind();
 }
 
