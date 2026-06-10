@@ -427,10 +427,10 @@ inline int check_pd_w_and_wo_attr(dnnl_engine_t engine,
 
 int check_ref_impl_hit(res_t *res);
 
-template <typename func_t, typename prb_t>
-int init_prim(benchdnn_dnnl_wrapper_t<dnnl_primitive_t> &user_prim,
-        const func_t &init_pd_func, const prb_t *prb, res_t *res,
-        dir_t dir = FLAG_FWD, const_dnnl_primitive_desc_t hint = nullptr,
+inline int init_prim(benchdnn_dnnl_wrapper_t<dnnl_primitive_t> &user_prim,
+        dnnl_status_t (*init_pd_func)(init_pd_args_t &), const base_prb_t *prb,
+        res_t *res, dir_t dir = FLAG_FWD,
+        const_dnnl_primitive_desc_t hint = nullptr,
         bool is_service_prim = false) {
     benchdnn_dnnl_wrapper_t<dnnl_primitive_t> primw;
 
@@ -500,15 +500,16 @@ int init_prim(benchdnn_dnnl_wrapper_t<dnnl_primitive_t> &user_prim,
     return res->state = INITIALIZED, OK;
 }
 
-template <typename func_t, typename prb_t>
-int init_prim(const thr_ctx_t &thr_ctx,
+inline int init_prim(const thr_ctx_t &thr_ctx,
         benchdnn_dnnl_wrapper_t<dnnl_primitive_t> &user_prim,
-        const func_t &init_pd_func, prb_t *prb, res_t *res,
-        dir_t dir = FLAG_FWD, const_dnnl_primitive_desc_t hint = nullptr,
+        dnnl_status_t (*init_pd_func)(init_pd_args_t &), const base_prb_t *prb,
+        res_t *res, dir_t dir = FLAG_FWD,
+        const_dnnl_primitive_desc_t hint = nullptr,
         bool is_service_prim = false) {
-    int (*f)(benchdnn_dnnl_wrapper_t<dnnl_primitive_t> &, func_t &,
-            const prb_t *, res_t *, dir_t, const_dnnl_primitive_desc_t, bool)
-            = init_prim<func_t, prb_t>;
+    int (*f)(benchdnn_dnnl_wrapper_t<dnnl_primitive_t> &,
+            dnnl_status_t (*)(init_pd_args_t &), const base_prb_t *, res_t *,
+            dir_t, const_dnnl_primitive_desc_t, bool)
+            = init_prim;
     return create_in_thr_ctx(thr_ctx, f, user_prim, init_pd_func, prb, res, dir,
             hint, is_service_prim);
 }
