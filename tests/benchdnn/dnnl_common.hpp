@@ -38,6 +38,7 @@
 #include "utils/impl_filter.hpp"
 #include "utils/numeric.hpp"
 #include "utils/parallel.hpp"
+#include "utils/prb.hpp"
 
 #include "tests/test_thread.hpp"
 
@@ -128,9 +129,8 @@ private:
     std::promise<void> prom_;
 };
 
-template <typename prb_t>
 struct init_pd_args_t {
-    init_pd_args_t(res_t *res, dnnl_engine_t engine, const prb_t *prb,
+    init_pd_args_t(res_t *res, dnnl_engine_t engine, const base_prb_t *prb,
             dir_t dir, const_dnnl_primitive_desc_t hint,
             const_dnnl_memory_desc_t src_md, bool force_f32_dt)
         : pd(nullptr)
@@ -143,7 +143,7 @@ struct init_pd_args_t {
         , src_md(src_md)
         , force_f32_dt(force_f32_dt) {}
 
-    init_pd_args_t(res_t *res, dnnl_engine_t engine, const prb_t *prb,
+    init_pd_args_t(res_t *res, dnnl_engine_t engine, const base_prb_t *prb,
             dir_t dir, const_dnnl_primitive_desc_t hint,
             const_dnnl_memory_desc_t src_md)
         : init_pd_args_t(res, engine, prb, dir, hint, src_md, false) {}
@@ -156,7 +156,7 @@ struct init_pd_args_t {
     // Input members
     res_t *res;
     dnnl_engine_t engine;
-    const prb_t *prb;
+    const base_prb_t *prb;
     // Used to specify the prop_kind of the pd. Required for double-run drivers
     // to differentiate between fwd-for-bwd pd and actual bwd pd.
     dir_t dir;
@@ -294,9 +294,8 @@ int check_dnnl_status(dnnl_status_t status, const prb_t *prb, res_t *res) {
 //     values.
 //
 // Note: `res` can be empty when fetching impl for prim_ref support.
-template <typename prb_t>
-int fetch_impl(benchdnn_dnnl_wrapper_t<dnnl_primitive_desc_t> &pdw,
-        init_pd_args_t<prb_t> &init_pd_args, const impl_filter_t &impl_filter,
+inline int fetch_impl(benchdnn_dnnl_wrapper_t<dnnl_primitive_desc_t> &pdw,
+        init_pd_args_t &init_pd_args, const impl_filter_t &impl_filter,
         res_t *res, bool is_service_prim) {
     if (!init_pd_args.pd) return FAIL;
 
@@ -357,7 +356,7 @@ int create_primitive(benchdnn_dnnl_wrapper_t<dnnl_primitive_t> &primw,
 
     benchdnn_dnnl_wrapper_t<dnnl_primitive_desc_t> pdw;
 
-    init_pd_args_t<prb_t> init_pd_args(
+    init_pd_args_t init_pd_args(
             res, engine, prb, dir, hint, src_md, force_f32_dt);
     status = init_pd_func(init_pd_args);
 
@@ -420,7 +419,7 @@ int check_pd_w_and_wo_attr(dnnl_engine_t engine, const func_t &init_pd_func,
     auto *prb_mutable = const_cast<prb_t *>(prb);
     auto old_attr = prb_mutable->attr;
     prb_mutable->attr = attr_t();
-    init_pd_args_t<prb_t> init_pd_args_without_attr(
+    init_pd_args_t init_pd_args_without_attr(
             res, engine, prb_mutable, dir, hint, /* src_md = */ nullptr);
     DNN_SAFE(init_pd_func(init_pd_args_without_attr), WARN);
     benchdnn_dnnl_wrapper_t<dnnl_primitive_desc_t> pdw(
@@ -684,8 +683,9 @@ dnnl_data_type_t deduce_cfg_data_type(
 // references once the object emplaced due to memory re-allocations happening
 // internally, while map doesn't not invalidate its references when adding a new
 // element which simplifies an implementation.
-template <typename prb_t>
-void init_memory_args(dnn_mem_map_t &mem_map, const prb_t *prb,
+// Note: not templated on the concrete driver `prb_t` since it only relies on
+// the common members exposed by the `base_prb_t` base class.
+inline void init_memory_args(dnn_mem_map_t &mem_map, const base_prb_t *prb,
         dnnl_primitive_t prim, const std::vector<int> &supported_exec_args,
         const engine_t &test_engine = get_test_engine()) {
     // Backward case when forward is required will have mem_map not empty.
@@ -1155,12 +1155,13 @@ int check_bitwise(dnnl_primitive_t prim, const std::vector<data_kind_t> &kinds,
 
 template <typename prb_t>
 int init_prim_ref_common(benchdnn_dnnl_wrapper_t<dnnl_primitive_t> &prim_ref,
-        const prb_t *prb_cpu, res_t *res) {
+        const prb_t *prb_cpu, res_t *res,
+        dnnl_status_t (*init_pd_func)(init_pd_args_t &)) {
 
-    init_pd_args_t<prb_t> init_pd_args(
+    init_pd_args_t init_pd_args(
             /* res = */ nullptr, get_cpu_engine(), prb_cpu, prb_cpu->dir,
             /* hint = */ nullptr, /* src_md = */ nullptr);
-    init_pd(init_pd_args);
+    init_pd_func(init_pd_args);
 
     benchdnn_dnnl_wrapper_t<dnnl_primitive_desc_t> pdw;
     // `is_service_prim=true` prevents from filtering the implementation

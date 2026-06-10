@@ -24,6 +24,7 @@
 #include "dnn_types.hpp"
 #include "dnnl_common.hpp"
 #include "utils/perf_report.hpp"
+#include "utils/prb.hpp"
 #include "utils/settings.hpp"
 
 namespace prelu {
@@ -50,7 +51,7 @@ struct settings_t : public base_settings_t {
     }
 };
 
-struct prb_t : public prb_vdims_t {
+struct prb_t : public prb_vdims_t, public base_prb_t {
     // A ctor with common interface across all drivers.
     prb_t(const settings_t &s)
         : prb_t(s.prb_vdims, s.dir[0], s.sdt[0], s.stag[0],
@@ -65,13 +66,11 @@ struct prb_t : public prb_vdims_t {
             const thr_ctx_t &ctx_init, const thr_ctx_t &ctx_exe,
             const impl_filter_t &impl_filter)
         : prb_vdims_t(prb_vdims)
-        , dir(dir)
+        , base_prb_t(dir, false, attr, impl_filter)
         , sdt(sdt)
         , stag(stag)
-        , attr(attr)
         , ctx_init(ctx_init)
-        , ctx_exe(ctx_exe)
-        , impl_filter(impl_filter) {
+        , ctx_exe(ctx_exe) {
         // Broadcast data types if needed
         if (sdt.size() == 1) {
             const auto val = sdt[0]; // Need a copy here.
@@ -80,27 +79,11 @@ struct prb_t : public prb_vdims_t {
 
         repro = set_repro_line(); // must be last in ctor to collect right info
     }
-
-    dir_t dir;
     std::vector<dnnl_data_type_t> sdt;
     std::vector<std::string> stag;
-    bool inplace = false; // Lacks placement, always considered `false`.
-    attr_t attr;
     thr_ctx_t ctx_init, ctx_exe;
-    impl_filter_t impl_filter;
-
-    // Used to construct memory desc when dimensions are runtime since such mds
-    // can't be used directly from query and memory objects can't be constructed.
-    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> get_md(int arg) const {
-        assert(!"No runtime dimensions support for this driver!");
-        return make_benchdnn_dnnl_wrapper<dnnl_memory_desc_t>(nullptr);
-    }
-
-    const char *str() const { return repro.c_str(); }
 
 private:
-    std::string repro;
-
     std::string set_repro_line();
 };
 
@@ -129,7 +112,7 @@ private:
     std::vector<std::string> stag_;
 };
 
-dnnl_status_t init_pd(init_pd_args_t<prb_t> &init_pd_args);
+dnnl_status_t init_pd(init_pd_args_t &init_pd_args);
 void setup_cmp(compare::compare_t &cmp, const prb_t *prb, data_kind_t kind,
         const args_t &ref_args);
 std::vector<int> supported_exec_args(dir_t dir);

@@ -30,6 +30,7 @@
 #include "dnnl_common.hpp"
 #include "dnnl_debug.hpp"
 #include "utils/perf_report.hpp"
+#include "utils/prb.hpp"
 #include "utils/settings.hpp"
 
 #include "bnorm/bnorm.hpp"
@@ -76,7 +77,7 @@ struct settings_t : public base_settings_t {
     }
 };
 
-struct prb_t : public prb_dims_t {
+struct prb_t : public prb_dims_t, public base_prb_t {
     // A ctor with common interface across all drivers.
     prb_t(const settings_t &s)
         : prb_t(s.prb_dims, s.tag[0], s.stat_tag[0], s.ss_dt[0], s.dir[0],
@@ -93,18 +94,15 @@ struct prb_t : public prb_dims_t {
             const thr_ctx_t &ctx_init, const thr_ctx_t &ctx_exe,
             const impl_filter_t &impl_filter)
         : prb_dims_t(prb_dims)
+        , base_prb_t(dir, inplace, attr, impl_filter)
         , check_alg(check_alg)
         , tag(tag)
         , stat_tag(stat_tag)
         , ss_dt(ss_dt)
-        , dir(dir)
         , dt(dt)
         , flags(flags)
-        , inplace(inplace)
-        , attr(attr)
         , ctx_init(ctx_init)
         , ctx_exe(ctx_exe)
-        , impl_filter(impl_filter)
         , n(1)
         , c(dims[ndims - 1])
         , eps(eps) {
@@ -124,13 +122,9 @@ struct prb_t : public prb_dims_t {
     std::vector<std::string> tag;
     std::string stat_tag;
     dnnl_data_type_t ss_dt;
-    dir_t dir;
     std::vector<dnnl_data_type_t> dt;
     flags_t flags;
-    bool inplace;
-    attr_t attr;
     thr_ctx_t ctx_init, ctx_exe;
-    impl_filter_t impl_filter;
     int64_t n, c;
     float eps;
 
@@ -139,18 +133,7 @@ struct prb_t : public prb_dims_t {
     bool use_sh() const { return flags & USE_SHIFT; }
     bool skip_mean() const { return flags & USE_RMS_NORM; }
 
-    // Used to construct memory desc when dimensions are runtime since such mds
-    // can't be used directly from query and memory objects can't be constructed.
-    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> get_md(int arg) const {
-        assert(!"No runtime dimensions support for this driver!");
-        return make_benchdnn_dnnl_wrapper<dnnl_memory_desc_t>(nullptr);
-    }
-
-    const char *str() const { return repro.c_str(); }
-
 private:
-    std::string repro;
-
     std::string set_repro_line();
 };
 
@@ -248,7 +231,7 @@ private:
     std::string stat_tag_;
 };
 
-dnnl_status_t init_pd(init_pd_args_t<prb_t> &init_pd_args);
+dnnl_status_t init_pd(init_pd_args_t &init_pd_args);
 void setup_cmp(compare::compare_t &cmp, const prb_t *prb, data_kind_t kind,
         const args_t &ref_args);
 std::vector<int> supported_exec_args(dir_t dir);
