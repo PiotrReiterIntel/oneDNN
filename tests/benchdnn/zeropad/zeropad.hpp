@@ -51,6 +51,7 @@ struct settings_t : public base_settings_t {
 };
 
 struct prb_t : public prb_dims_t, public base_prb_t {
+    void skip_unimplemented(res_t *res) const override;
     // A ctor with common interface across all drivers.
     prb_t(const settings_t &s) : prb_t(s.prb_dims, s.dt[0], s.tag[0]) {
         SAFE_V(s.has_single_setup() ? OK : FAIL);

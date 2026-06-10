@@ -489,7 +489,8 @@ int init_kernel(kernel_args_t &kernel_args) {
     return OK;
 }
 
-void skip_unimplemented_prb(const prb_t *prb, res_t *res) {
+void prb_t::skip_unimplemented(res_t *res) const {
+    const prb_t *prb = this;
     auto is_xf16 = [](dnnl_data_type_t dt) {
         return dt == dnnl_bf16 || dt == dnnl_f16;
     };

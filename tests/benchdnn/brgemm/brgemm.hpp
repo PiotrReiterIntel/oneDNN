@@ -73,6 +73,7 @@ struct settings_t : public base_settings_t {
 };
 
 struct prb_t : public prb_vdims_t, public base_prb_t {
+    void skip_unimplemented(res_t *res) const override;
     prb_t(const prb_vdims_t &prb_vdims, const std::vector<dnnl_data_type_t> &dt,
             const std::string &stag, const std::string &wtag,
             const std::string &dtag, const vdims_t &strides,
@@ -244,7 +245,6 @@ struct cfg_t : public base_cfg_t {
 // See the description next to the definition.
 int brgemm_finalize();
 
-void skip_unimplemented_prb(const prb_t *prb, res_t *res);
 void skip_invalid_prb(const prb_t *prb, res_t *res);
 void compute_ref(const prb_t *prb, dir_t dir, const args_t &args,
         dnnl_primitive_t prim_ref = nullptr);
