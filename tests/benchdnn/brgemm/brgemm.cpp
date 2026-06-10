@@ -516,7 +516,8 @@ void prb_t::skip_unimplemented(res_t *res) const {
     res->reason = reason_t::skip_not_supported;
 }
 
-void skip_invalid_prb(const prb_t *prb, res_t *res) {
+void prb_t::skip_invalid(res_t *res) const {
+    const prb_t *prb = this;
 #if !defined(DNNL_EXPERIMENTAL_UKERNEL)
     // Reorder does not support s8 and zp compensations for arbitrary shapes,
     // so skip unsupported cases.
@@ -1160,7 +1161,7 @@ int doit(const prb_t *prb, res_t *res) {
     if (res->state == SKIPPED) return OK;
 
     // Need this here as brgemm has no primitive creation step
-    skip_invalid_prb(prb, res);
+    prb->skip_invalid(res);
     if (res->state == SKIPPED) return OK;
 
     kernel_args_t kernel_args(prb, res);
