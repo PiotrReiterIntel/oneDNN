@@ -298,7 +298,8 @@ int init_ref_memory_args(dnn_mem_map_t &mem_map0, dnn_mem_map_t &mem_map1,
 }
 
 int createit(std::vector<benchdnn_dnnl_wrapper_t<dnnl_primitive_t>> &v_prim,
-        const prb_t *prb, res_t *res) {
+        const base_prb_t *base_prb, res_t *res) {
+    const prb_t *prb = static_cast<const prb_t *>(base_prb);
     v_prim.resize(3); // fused + 2 unfused
 
     SAFE(init_prim(prb->ctx_init, v_prim[0], conv::init_pd, prb, res), WARN);
@@ -325,7 +326,8 @@ int createit(std::vector<benchdnn_dnnl_wrapper_t<dnnl_primitive_t>> &v_prim,
 }
 
 int checkit(std::vector<benchdnn_dnnl_wrapper_t<dnnl_primitive_t>> &v_prim,
-        const prb_t *prb, res_t *res) {
+        const base_prb_t *base_prb, res_t *res) {
+    const prb_t *prb = static_cast<const prb_t *>(base_prb);
     SAFE(check_caches(v_prim[0], prb->ctx_init, res), WARN);
 
     SAFE(check_caches(v_prim[1], prb->ctx_init, res), WARN);
@@ -336,7 +338,8 @@ int checkit(std::vector<benchdnn_dnnl_wrapper_t<dnnl_primitive_t>> &v_prim,
 }
 
 int doit(const std::vector<benchdnn_dnnl_wrapper_t<dnnl_primitive_t>> &v_prim,
-        const prb_t *prb, res_t *res) {
+        const base_prb_t *base_prb, res_t *res) {
+    const prb_t *prb = static_cast<const prb_t *>(base_prb);
     const auto &prim = v_prim[0];
     const auto &prim0 = v_prim[1];
     const auto &prim1 = v_prim[2];

@@ -257,14 +257,16 @@ std::vector<data_kind_t> get_kinds_to_check(const prb_t *prb) {
 }
 
 int createit(std::vector<benchdnn_dnnl_wrapper_t<dnnl_primitive_t>> &v_prim,
-        const prb_t *prb, res_t *res) {
+        const base_prb_t *base_prb, res_t *res) {
+    const prb_t *prb = static_cast<const prb_t *>(base_prb);
     v_prim.resize(1);
     SAFE(init_prim(prb->ctx_init, v_prim[0], init_pd, prb, res), WARN);
     return OK;
 }
 
 int checkit(std::vector<benchdnn_dnnl_wrapper_t<dnnl_primitive_t>> &v_prim,
-        const prb_t *prb, res_t *res) {
+        const base_prb_t *base_prb, res_t *res) {
+    const prb_t *prb = static_cast<const prb_t *>(base_prb);
     if (has_bench_mode_bit(mode_bit_t::exec)) {
         SAFE(check_total_size(res), WARN);
     }
@@ -275,7 +277,8 @@ int checkit(std::vector<benchdnn_dnnl_wrapper_t<dnnl_primitive_t>> &v_prim,
 }
 
 int doit(const std::vector<benchdnn_dnnl_wrapper_t<dnnl_primitive_t>> &v_prim,
-        const prb_t *prb, res_t *res) {
+        const base_prb_t *base_prb, res_t *res) {
+    const prb_t *prb = static_cast<const prb_t *>(base_prb);
     set_zmalloc_max_expected_size(res->mem_size_args.zmalloc_expected_size);
 
     const auto &prim = v_prim[0];
