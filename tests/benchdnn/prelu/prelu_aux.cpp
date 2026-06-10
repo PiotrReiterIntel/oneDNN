@@ -24,7 +24,7 @@
 namespace prelu {
 
 std::string prb_t::set_repro_line() {
-    dnnl::impl::stringstream_t s;
+    std::stringstream s;
     using ::operator<<;
 
     dump_global_params(s);

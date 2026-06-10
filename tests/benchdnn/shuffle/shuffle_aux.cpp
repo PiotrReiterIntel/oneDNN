@@ -24,7 +24,7 @@
 namespace shuffle {
 
 std::string prb_t::set_repro_line() {
-    dnnl::impl::stringstream_t s;
+    std::stringstream s;
     dump_global_params(s);
     settings_t def;
 

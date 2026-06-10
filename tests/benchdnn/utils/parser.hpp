@@ -37,7 +37,7 @@
 namespace parser {
 
 extern bool last_parsed_is_problem;
-extern dnnl::impl::stringstream_t help_ss;
+extern std::stringstream help_ss;
 
 namespace utils {
 

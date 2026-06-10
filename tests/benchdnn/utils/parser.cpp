@@ -30,7 +30,7 @@
 namespace parser {
 
 bool last_parsed_is_problem = false;
-dnnl::impl::stringstream_t help_ss;
+std::stringstream help_ss;
 
 static const std::string benchdnn_url
         = "https://github.com/uxlfoundation/oneDNN/blob/main/tests/benchdnn";

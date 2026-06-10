@@ -363,7 +363,7 @@ std::string case_to_str(const std::string &json_file,
         const dnnl_data_type_t dt,
         const std::map<size_t, dnnl_data_type_t> &dt_map,
         const std::map<size_t, std::string> &op_kind_map) {
-    dnnl::impl::stringstream_t s;
+    std::stringstream s;
     dump_global_params(s);
 
     if (mb != 0) { s << "--mb=" << mb << " "; }
