@@ -1149,9 +1149,9 @@ int init_ref_memory_args_default_case(int exec_arg, dnn_mem_t &mem,
 int check_bitwise(dnnl_primitive_t prim, const std::vector<data_kind_t> &kinds,
         const args_t &args, const attr_t &attr, bool inplace, res_t *res);
 
-template <typename prb_t>
-int init_prim_ref_common(benchdnn_dnnl_wrapper_t<dnnl_primitive_t> &prim_ref,
-        const prb_t *prb_cpu, res_t *res,
+inline int init_prim_ref_common(
+        benchdnn_dnnl_wrapper_t<dnnl_primitive_t> &prim_ref,
+        const base_prb_t *prb_cpu, res_t *res,
         dnnl_status_t (*init_pd_func)(init_pd_args_t &)) {
 
     init_pd_args_t init_pd_args(
