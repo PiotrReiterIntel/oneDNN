@@ -47,22 +47,6 @@
 
 #endif
 
-// Here we define some types in global namespace to handle customized
-// threading context for creation and execution
-struct thr_ctx_t {
-    int max_concurrency;
-    int core_type;
-    int nthr_per_core;
-
-    bool operator==(const thr_ctx_t &rhs) const {
-        return max_concurrency == rhs.max_concurrency
-                && core_type == rhs.core_type
-                && nthr_per_core == rhs.nthr_per_core;
-    }
-    bool operator!=(const thr_ctx_t &rhs) const { return !(*this == rhs); }
-    void *get_interop_obj() const;
-};
-
 // This hack renames the namespaces used by threading functions for
 // threadpool-related functions so that the calls to dnnl::impl::parallel*()
 // from the test use a special testing threadpool.
@@ -83,9 +67,7 @@ struct thr_ctx_t {
 #error "src/common/dnnl_thread.hpp" has an unexpected header guard
 #endif
 
-std::ostream &operator<<(std::ostream &os, const thr_ctx_t &ctx);
-
-const thr_ctx_t &get_default_thr_ctx();
+#include "tests/thread_context.hpp"
 
 #if DNNL_CPU_THREADING_RUNTIME == DNNL_RUNTIME_THREADPOOL
 #include "oneapi/dnnl/dnnl_threadpool_iface.hpp"
@@ -132,24 +114,6 @@ struct scoped_tp_deactivation_t {
 } // namespace testing
 } // namespace dnnl
 #endif
-
-// These are free functions to allow running a function in a given threading
-// context.
-// A threading context is defined by:
-// - number of threads
-// - type of cores (TBB only)
-// - threads per core (TBB only)
-
-// Note: we have to differentiate creation and execution in thread
-// context because of threadpool as it uses different mecanisms in
-// both (in execution, tp is passed in stream)
-//
-// Definitions live in test_thread.cpp where the runtime-specific logic is
-// handled inside a single version of each function.
-
-int create_in_thr_ctx(const thr_ctx_t &ctx, const std::function<int()> &f);
-// The function f shall take an interop obj as last argument
-int execute_in_thr_ctx(const thr_ctx_t &ctx, const std::function<int()> &f);
 
 // TBB runtime may crash when it is used under CTest. This is a known TBB
 // limitation that can be worked around by doing explicit finalization.

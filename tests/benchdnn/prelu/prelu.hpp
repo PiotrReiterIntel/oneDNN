@@ -68,11 +68,9 @@ struct prb_t : public prb_vdims_t, public base_prb_t {
             const thr_ctx_t &ctx_init, const thr_ctx_t &ctx_exe,
             const impl_filter_t &impl_filter)
         : prb_vdims_t(prb_vdims)
-        , base_prb_t(dir, false, attr, impl_filter)
+        , base_prb_t(dir, false, attr, ctx_init, ctx_exe, impl_filter)
         , sdt(sdt)
-        , stag(stag)
-        , ctx_init(ctx_init)
-        , ctx_exe(ctx_exe) {
+        , stag(stag) {
         // Broadcast data types if needed
         if (sdt.size() == 1) {
             const auto val = sdt[0]; // Need a copy here.
@@ -83,7 +81,6 @@ struct prb_t : public prb_vdims_t, public base_prb_t {
     }
     std::vector<dnnl_data_type_t> sdt;
     std::vector<std::string> stag;
-    thr_ctx_t ctx_init, ctx_exe;
 
 private:
     std::string set_repro_line();
