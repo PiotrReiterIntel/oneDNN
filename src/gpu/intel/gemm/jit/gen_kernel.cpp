@@ -99,35 +99,10 @@ static gemmstone::Scalar stringToScalar(std::string val) {
         default: return Scalar(std::stoi(val));
     }
 }
-#endif
 
-status_t gen_desc_t::finalize(const char *tags) {
-    // Update problem alignments to match catalog entry.
-    if (!isPacked(problem_.A.layout)
-            && problem_.Ta_ext.paddedSize() >= problem_.Ta.paddedSize()) {
-        problem_.A.setAlignment(std::max(
-                problem_.Ta_ext.paddedSize(), entry_->driverInfo.alignment[0]));
-    }
-
-    if (!isPacked(problem_.B.layout)
-            && problem_.Tb_ext.paddedSize() >= problem_.Tb.paddedSize()) {
-        problem_.B.setAlignment(std::max(
-                problem_.Tb_ext.paddedSize(), entry_->driverInfo.alignment[1]));
-    }
-
-    if (!isPacked(problem_.C.layout)) {
-        problem_.C.setAlignment(std::max(problem_.Tc_ext.paddedSize(),
-                entry_->restrictions.alignment[2]));
-    }
-
-    problem_.CO.setAlignment(problem_.Tco.paddedSize());
-
-    // Parse strategy string.
-    strategy_ = GEMMStrategy(hw_, stepping_);
-#ifdef DNNL_DEV_MODE
-    std::string ovr_strategy;
-    ovr_strategy = gpu_utils::dev_getenv("GEMM_KERNEL", ovr_strategy);
-    if (!ovr_strategy.empty()) {
+status_t gen_desc_t::apply_kernel_override(std::string ovr_strategy) {
+    using namespace gemmstone;
+    try {
         // Warning: will override problem data types (including up/down
         // conversions) - this will cause inaccuracies if precisions/layouts
         // are chosen that are incompatible with the given problem
@@ -183,6 +158,45 @@ status_t gen_desc_t::finalize(const char *tags) {
             aux_params_.k0 = EvaluateAuxOutput().k0;
             aux_params_.wgK = EvaluateAuxOutput().wgK;
         }
+    } catch (const std::exception &e) {
+        // Invalid overrides are expected during tuning; reject the kernel
+        // instead of aborting.
+        VDEBUGINFO(1, primitive, gpu, "%s,%s", "jit::gemm kernel override",
+                e.what());
+        return status::unimplemented;
+    }
+    return status::success;
+}
+#endif
+
+status_t gen_desc_t::finalize(const char *tags) {
+    // Update problem alignments to match catalog entry.
+    if (!isPacked(problem_.A.layout)
+            && problem_.Ta_ext.paddedSize() >= problem_.Ta.paddedSize()) {
+        problem_.A.setAlignment(std::max(
+                problem_.Ta_ext.paddedSize(), entry_->driverInfo.alignment[0]));
+    }
+
+    if (!isPacked(problem_.B.layout)
+            && problem_.Tb_ext.paddedSize() >= problem_.Tb.paddedSize()) {
+        problem_.B.setAlignment(std::max(
+                problem_.Tb_ext.paddedSize(), entry_->driverInfo.alignment[1]));
+    }
+
+    if (!isPacked(problem_.C.layout)) {
+        problem_.C.setAlignment(std::max(problem_.Tc_ext.paddedSize(),
+                entry_->restrictions.alignment[2]));
+    }
+
+    problem_.CO.setAlignment(problem_.Tco.paddedSize());
+
+    // Parse strategy string.
+    strategy_ = GEMMStrategy(hw_, stepping_);
+#ifdef DNNL_DEV_MODE
+    std::string ovr_strategy;
+    ovr_strategy = gpu_utils::dev_getenv("GEMM_KERNEL", ovr_strategy);
+    if (!ovr_strategy.empty()) {
+        CHECK(apply_kernel_override(std::move(ovr_strategy)));
     } else {
 #endif
         strategy_.unroll[LoopM] = entry_->driverInfo.unroll[LoopM];
