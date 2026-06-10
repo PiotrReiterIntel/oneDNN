@@ -554,15 +554,18 @@ int init_prim(const thr_ctx_t &thr_ctx,
 // Returns nothing since the object is modified by reference due to lifetime of
 // the compare object is controlled by `check_correctness`.
 //
-// `setup_cmp` operates on the `base_prb_t` type and downcasts to the concrete
-// driver `prb_t` internally. This lets the signature be captured by a dedicated
-// function type alias so `check_correctness` doesn't need to be templated on it.
+// `setup_cmp` and `compute_ref` operate on the `base_prb_t` type and downcast to
+// the concrete driver `prb_t` internally. This lets their signatures be captured
+// by dedicated function type aliases so `check_correctness` doesn't need to be
+// templated on the concrete `prb_t`.
 using setup_cmp_func_t = void (*)(compare::compare_t &cmp,
         const base_prb_t *base_prb, data_kind_t kind, const args_t &ref_args);
+using compute_ref_func_t = void (*)(const base_prb_t *base_prb, dir_t dir,
+        const args_t &args, dnnl_primitive_t prim_ref);
 
-template <typename prb_t>
-void check_correctness(const prb_t *prb, const std::vector<data_kind_t> &kinds,
-        const args_t &args, const args_t &ref_args,
+inline void check_correctness(const base_prb_t *prb,
+        const std::vector<data_kind_t> &kinds, const args_t &args,
+        const args_t &ref_args, const compute_ref_func_t &compute_ref_func,
         const setup_cmp_func_t &setup_cmp_func, res_t *res, dir_t dir,
         dnnl_primitive_t prim_ref = nullptr) {
     // Fast exit for any modes but correctness.
@@ -576,7 +579,7 @@ void check_correctness(const prb_t *prb, const std::vector<data_kind_t> &kinds,
         BENCHDNN_PRINT(8, "%s\n", "[NAIVE_REF]: Start");
     }
 
-    TIME_REF(compute_ref(prb, dir, ref_args, prim_ref));
+    TIME_REF(compute_ref_func(prb, dir, ref_args, prim_ref));
 
     // Forward-for-backward service primitives define `kinds` as empty to skip
     // validation. This is to avoid extra checks on higher level.
