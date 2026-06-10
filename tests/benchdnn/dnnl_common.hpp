@@ -554,10 +554,13 @@ int init_prim(const thr_ctx_t &thr_ctx,
 // Returns nothing since the object is modified by reference due to lifetime of
 // the compare object is controlled by `check_correctness`.
 //
-// Note: a dedicated non-templated type for `setup_cmp_func_t` could be used but
-// since it relies on a `prb_t` type which is individual for each driver,
-// it isn't possible without a template.
-template <typename setup_cmp_func_t, typename prb_t>
+// `setup_cmp` operates on the `base_prb_t` type and downcasts to the concrete
+// driver `prb_t` internally. This lets the signature be captured by a dedicated
+// function type alias so `check_correctness` doesn't need to be templated on it.
+using setup_cmp_func_t = void (*)(compare::compare_t &cmp,
+        const base_prb_t *base_prb, data_kind_t kind, const args_t &ref_args);
+
+template <typename prb_t>
 void check_correctness(const prb_t *prb, const std::vector<data_kind_t> &kinds,
         const args_t &args, const args_t &ref_args,
         const setup_cmp_func_t &setup_cmp_func, res_t *res, dir_t dir,

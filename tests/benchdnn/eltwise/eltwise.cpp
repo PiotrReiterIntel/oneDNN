@@ -366,8 +366,9 @@ bool miopen_check_correctness(const prb_t *prb,
     return false;
 }
 
-void setup_cmp(compare::compare_t &cmp, const prb_t *prb, data_kind_t kind,
-        const args_t &ref_args) {
+void setup_cmp(compare::compare_t &cmp, const base_prb_t *base_prb,
+        data_kind_t kind, const args_t &ref_args) {
+    const prb_t *prb = static_cast<const prb_t *>(base_prb);
     const float trh
             = get_eltwise_threshold(prb->dt, prb->alg, prb->dir & FLAG_FWD);
     cmp.set_threshold(trh);

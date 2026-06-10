@@ -627,8 +627,9 @@ void skip_invalid_prb(const prb_t *prb, res_t *res) {
 #endif
 }
 
-void setup_cmp(compare::compare_t &cmp, const prb_t *prb, data_kind_t kind,
-        const args_t &ref_args) {
+void setup_cmp(compare::compare_t &cmp, const base_prb_t *base_prb,
+        data_kind_t kind, const args_t &ref_args) {
+    const prb_t *prb = static_cast<const prb_t *>(base_prb);
     const auto dt = prb->get_dt(kind);
     const float trh = dt == dnnl_f32 ? 1e-6f : epsilon_dt(dt);
     cmp.set_threshold(trh);
