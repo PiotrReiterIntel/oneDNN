@@ -49,7 +49,7 @@ struct settings_t {
     void finalize() {};
 };
 
-struct prb_t {
+struct prb_t : public base_prb_t {
     prb_t(const settings_t &s) : arg_mds_(s.arg_mds_), alg(s.alg) {
         switch (alg) {
             case GENINDEX: axis = s.axis; break;
@@ -61,7 +61,6 @@ struct prb_t {
     ::std::unordered_map<int, arg_md_t> arg_mds_;
     ::std::vector<int64_t> order;
     int64_t axis = -1;
-    attr_t attr;
     alg_t alg = ALG_UNKNOWN;
 };
 

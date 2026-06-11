@@ -167,9 +167,7 @@ int ref_primitive_t::init_prb(res_t *res) {
                 = get_setting<::driver::settings_t>(op_, res); \
         if (res->state == INVALID_ARGUMENTS) return FAIL; \
         setting.finalize(); \
-        auto pprb = ::std::make_shared<::driver::prb_t>(setting); \
-        prb_wrapper_ \
-                = ::std::make_shared<prb_wrapper_t<::driver::prb_t>>(pprb); \
+        prb_ = ::std::make_shared<::driver::prb_t>(setting); \
         break; \
     }
 
@@ -192,7 +190,8 @@ int ref_primitive_t::init_prim(
 
 #define CASE_INIT_PRIM(driver) \
     case dnnl_driver_t::driver: { \
-        const ::driver::prb_t *prb = prb_wrapper_->get<::driver::prb_t>(); \
+        const ::driver::prb_t *prb \
+                = static_cast<const ::driver::prb_t *>(prb_.get()); \
         dnn_mem_map_t ref_mems; \
         if (is_special_backward_op_) { \
             SAFE(create_primitive(fwd_prim_, ref_eng, ::driver::init_pd, prb, \
@@ -231,8 +230,9 @@ int ref_primitive_t::init_prim(
 void ref_primitive_t::init_memory_args(const engine_t &ref_eng) {
 #define CASE_INIT_MEMORY_ARGS(driver) \
     case dnnl_driver_t::driver: { \
-        if (prb_wrapper_) { \
-            const ::driver::prb_t *prb = prb_wrapper_->get<::driver::prb_t>(); \
+        if (prb_) { \
+            const ::driver::prb_t *prb \
+                    = static_cast<const ::driver::prb_t *>(prb_.get()); \
             if (prim_) { \
                 ::init_memory_args(mems_, prb, prim_, \
                         ::driver::supported_exec_args(prb->dir), ref_eng); \
@@ -246,8 +246,9 @@ void ref_primitive_t::init_memory_args(const engine_t &ref_eng) {
 
 #define CASE_INIT_CUSTOM_MEMORY_ARGS \
     case dnnl_driver_t::custom: { \
-        if (prb_wrapper_) { \
-            const ::custom::prb_t *prb = prb_wrapper_->get<::custom::prb_t>(); \
+        if (prb_) { \
+            const ::custom::prb_t *prb \
+                    = static_cast<const ::custom::prb_t *>(prb_.get()); \
             ::custom::init_memory_args( \
                     mems_, prb, ::custom::supported_exec_args(prb), ref_eng); \
         } \
@@ -261,8 +262,9 @@ int ref_primitive_t::init_ref_memory_args(const engine_t &ref_eng, res_t *res) {
 #define CASE_INIT_REF_MEMORY_ARGS(driver) \
     case dnnl_driver_t::driver: { \
         dnn_mem_map_t ref_mems; \
-        if (prb_wrapper_) { \
-            const ::driver::prb_t *prb = prb_wrapper_->get<::driver::prb_t>(); \
+        if (prb_) { \
+            const ::driver::prb_t *prb \
+                    = static_cast<const ::driver::prb_t *>(prb_.get()); \
             SAFE(::driver::init_ref_memory_args( \
                          ref_mems, mems_, prim_, prb, res), \
                     WARN); \
@@ -274,8 +276,9 @@ int ref_primitive_t::init_ref_memory_args(const engine_t &ref_eng, res_t *res) {
 #define CASE_INIT_CUSTOM_REF_MEMORY_ARGS \
     case dnnl_driver_t::custom: { \
         dnn_mem_map_t ref_mems; \
-        if (prb_wrapper_) { \
-            const ::custom::prb_t *prb = prb_wrapper_->get<::custom::prb_t>(); \
+        if (prb_) { \
+            const ::custom::prb_t *prb \
+                    = static_cast<const ::custom::prb_t *>(prb_.get()); \
             SAFE(::custom::init_ref_memory_args(ref_mems, mems_, prb, res), \
                     WARN); \
             args_ = args_t(mems_); \
@@ -292,8 +295,9 @@ int ref_primitive_t::execute_prim(res_t *res) const {
     case dnnl_driver_t::driver: { \
         if (prim_) { \
             SAFE(execute_and_wait(prim_, args_, res), WARN); \
-        } else if (prb_wrapper_) { \
-            const ::driver::prb_t *prb = prb_wrapper_->get<::driver::prb_t>(); \
+        } else if (prb_) { \
+            const ::driver::prb_t *prb \
+                    = static_cast<const ::driver::prb_t *>(prb_.get()); \
             SAFE(driver::execute(prb, args_, res), WARN); \
         } \
         break; \
@@ -301,8 +305,9 @@ int ref_primitive_t::execute_prim(res_t *res) const {
 
 #define CASE_CUSTOM_EXECUTE \
     case dnnl_driver_t::custom: { \
-        if (prb_wrapper_) { \
-            const ::custom::prb_t *prb = prb_wrapper_->get<::custom::prb_t>(); \
+        if (prb_) { \
+            const ::custom::prb_t *prb \
+                    = static_cast<const ::custom::prb_t *>(prb_.get()); \
             SAFE(::custom::execute(prb, args_, res), WARN); \
         } \
         break; \
@@ -336,7 +341,8 @@ void ref_primitive_t::check_correctness(
 
 #define CASE_CHECK_CORRECTNESS(driver) \
     case dnnl_driver_t::driver: { \
-        const ::driver::prb_t *prb = prb_wrapper_->get<::driver::prb_t>(); \
+        const ::driver::prb_t *prb \
+                = static_cast<const ::driver::prb_t *>(prb_.get()); \
         setup_cmp(cmp, prb, dnnl_arg_2_data_kind_map.at(arg), args_); \
         attr = prb->attr; \
         break; \
