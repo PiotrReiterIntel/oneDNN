@@ -122,7 +122,7 @@ void setup_cmp(compare::compare_t &cmp, const base_prb_t *base_prb,
     cmp.set_threshold(epsilon_dt(prb->ddt) * prb->n_inputs());
 }
 
-std::vector<int> supported_exec_args(dir_t dir) {
+std::vector<int> supported_exec_args(const base_prb_t *, dir_t dir) {
     static const std::vector<int> exec_args = {
             DNNL_ARG_MULTIPLE_SRC,
             DNNL_ARG_DST,
@@ -203,7 +203,7 @@ int doit(const std::vector<benchdnn_dnnl_wrapper_t<dnnl_primitive_t>> &v_prim,
     const auto &prim = v_prim[0];
 
     dnn_mem_map_t mem_map, ref_mem_map;
-    init_memory_args(mem_map, prb, prim, supported_exec_args(prb->dir));
+    init_memory_args(mem_map, prb, prim, supported_exec_args(prb, prb->dir));
     TIME_FILL(SAFE(
             init_ref_memory_args(ref_mem_map, mem_map, prim, prb, res), WARN));
 

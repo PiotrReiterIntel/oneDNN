@@ -261,7 +261,7 @@ int fill_data(data_kind_t kind, int exec_arg, const prb_t *prb,
 dnnl_status_t init_pd(init_pd_args_t &init_pd_args);
 void setup_cmp(compare::compare_t &cmp, const base_prb_t *base_prb,
         data_kind_t kind, const args_t &ref_args);
-std::vector<int> supported_exec_args(dir_t dir = FLAG_FWD);
+std::vector<int> supported_exec_args(const base_prb_t *, dir_t dir = FLAG_FWD);
 int init_ref_memory_args(dnn_mem_map_t &ref_mem_map, dnn_mem_map_t &mem_map,
         dnnl_primitive_t prim, const base_prb_t *base_prb, res_t *res,
         dnnl_primitive_t prim_ref = nullptr);

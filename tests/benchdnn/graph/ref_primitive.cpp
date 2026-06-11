@@ -201,7 +201,7 @@ int ref_primitive_t::init_prim(
             if (res->state == SKIPPED || res->state == UNIMPLEMENTED) \
                 return OK; \
             ::init_memory_args(mems_, prb, fwd_prim_, \
-                    ::driver::supported_exec_args(FLAG_FWD), ref_eng); \
+                    ::driver::supported_exec_args(prb, FLAG_FWD), ref_eng); \
             SAFE(::driver::init_ref_memory_args( \
                          ref_mems, mems_, fwd_prim_, prb, res), \
                     WARN); \

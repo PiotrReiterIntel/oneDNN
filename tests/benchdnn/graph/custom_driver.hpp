@@ -65,7 +65,7 @@ struct prb_t : public base_prb_t {
 };
 
 dnnl_status_t init_pd(init_pd_args_t &init_pd_args);
-std::vector<int> supported_exec_args(const base_prb_t *prb);
+std::vector<int> supported_exec_args(const base_prb_t *prb, dir_t);
 
 int fill_mem(dnn_mem_t &mem_dt, dnn_mem_t &mem_fp, int f_min, int f_max);
 void setup_cmp(compare::compare_t &cmp, const base_prb_t *prb, data_kind_t kind,

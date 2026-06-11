@@ -202,7 +202,7 @@ dnnl_status_t init_pd(init_pd_args_t &init_pd_args) {
     return dnnl_success;
 }
 
-std::vector<int> supported_exec_args(const base_prb_t *base_prb) {
+std::vector<int> supported_exec_args(const base_prb_t *base_prb, dir_t) {
     const auto *prb = static_cast<const prb_t *>(base_prb);
     std::vector<int> exec_args;
     switch (prb->alg) {
