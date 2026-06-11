@@ -17,9 +17,6 @@
 #ifndef BENCHDNN_GRAPH_ALLOCATOR_HPP
 #define BENCHDNN_GRAPH_ALLOCATOR_HPP
 
-#include <unordered_set>
-
-#include "dnnl_common.hpp"
 #include "memory_pool.hpp"
 #include "oneapi/dnnl/dnnl_graph.hpp"
 

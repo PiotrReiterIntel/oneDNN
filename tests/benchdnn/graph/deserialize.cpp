@@ -23,6 +23,8 @@
 #include <sstream>
 #include <stdexcept>
 
+#include "dnn_types.hpp"
+
 #include "deserialize.hpp"
 
 namespace graph {

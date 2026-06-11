@@ -46,7 +46,9 @@
 #endif
 
 #include "common.hpp"
-#include "dnnl_common.hpp"
+#include "dnnl_memory.hpp"
+#include "utils/engine.hpp"
+#include "utils/timer.hpp"
 
 namespace graph {
 
