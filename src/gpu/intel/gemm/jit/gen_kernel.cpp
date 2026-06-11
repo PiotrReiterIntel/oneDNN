@@ -109,7 +109,7 @@ status_t gen_desc_t::apply_kernel_override(std::string ovr_strategy) {
         std::stringstream ss(ovr_strategy);
         std::string val;
         ss >> val;
-        gpu_assert(val == "gemm");
+        if (val != "gemm") throw std::runtime_error("expected 'gemm' prefix");
         ss >> val;
         const char *pstr = val.c_str();
         pstr = parsePrecisions(pstr, problem_.Ta_ext, problem_.Ta);
@@ -143,20 +143,29 @@ status_t gen_desc_t::apply_kernel_override(std::string ovr_strategy) {
         ovr_strategy = ss.str().substr(ss.tellg()); // remaining string
         parseStrategy(ovr_strategy, hw_, problem_, strategy_);
 
-        // TODO: override derived values in aux_params_ in a way that's
-        // consistent with the kernel evaluator (typically requires extra
-        // benchmarking data not supplied with the kernel override string)
-        // Currently: assume the W model because it's simple
-        if (strategy_.kParallelLocal) {
-            aux_params_.k0
-                    = utils::rnd_up(utils::div_up(k_, strategy_.wg[LoopK]),
-                            strategy_.unroll[LoopK]);
-            aux_params_.wgK = std::max(1,
-                    std::min(strategy_.wg[LoopK],
-                            int(utils::div_up(k_, aux_params_.k0))));
-        } else {
-            aux_params_.k0 = EvaluateAuxOutput().k0;
-            aux_params_.wgK = EvaluateAuxOutput().wgK;
+        // Keep evaluator-derived dispatch params (k0/wgK) when the override
+        // reproduces the entry's k-parallel geometry; otherwise re-derive
+        // them (assume the W model).
+        const auto &di = entry_->driverInfo;
+        bool reproduces_entry = strategy_.kParallel == di.kParallel()
+                && strategy_.kParallelLocal == di.kParallelLocal()
+                && strategy_.kParallelVariable == di.kParallelVariable()
+                && strategy_.wg[LoopK] == di.wg[LoopK];
+        if (!reproduces_entry) {
+            if (strategy_.kParallelLocal) {
+                if (strategy_.wg[LoopK] < 1 || strategy_.unroll[LoopK] < 1)
+                    throw std::runtime_error(
+                            "invalid k-parallel-local geometry");
+                aux_params_.k0
+                        = utils::rnd_up(utils::div_up(k_, strategy_.wg[LoopK]),
+                                strategy_.unroll[LoopK]);
+                aux_params_.wgK = std::max(1,
+                        std::min(strategy_.wg[LoopK],
+                                int(utils::div_up(k_, aux_params_.k0))));
+            } else {
+                aux_params_.k0 = 0;
+                aux_params_.wgK = 1;
+            }
         }
     } catch (const std::exception &e) {
         // Invalid overrides are expected during tuning; reject the kernel
@@ -193,8 +202,8 @@ status_t gen_desc_t::finalize(const char *tags) {
     // Parse strategy string.
     strategy_ = GEMMStrategy(hw_, stepping_);
 #ifdef DNNL_DEV_MODE
-    std::string ovr_strategy;
-    ovr_strategy = gpu_utils::dev_getenv("GEMM_KERNEL", ovr_strategy);
+    std::string ovr_strategy
+            = gpu_utils::dev_getenv("GEMM_KERNEL", kernel_override_);
     if (!ovr_strategy.empty()) {
         CHECK(apply_kernel_override(std::move(ovr_strategy)));
     } else {
