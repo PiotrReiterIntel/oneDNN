@@ -21,6 +21,37 @@
 
 namespace graph {
 
+// A function that executes a graph reference path for a driver that has no
+// primitive (or a custom driver). Operates on the `base_prb_t` type and
+// downcasts to the concrete driver `prb_t` internally.
+using execute_func_t = std::function<int(
+        const base_prb_t *base_prb, const args_t &args, res_t *res)>;
+
+// A function that initializes the reference memory arguments for a driver
+// that runs through its own reference (an empty primitive or a custom driver).
+// Operates on the `base_prb_t` type and downcasts to the concrete driver
+// `prb_t` internally.
+using init_memory_args_native_func_t = std::function<void(
+        const base_prb_t *base_prb, const deserialized_op_t &base_op_ref,
+        dnn_mem_map_t &mem_map, const engine_t &ref_eng)>;
+
+// A function that returns the list of supported execution arguments for a
+// driver given its problem descriptor and propagation direction.
+using supported_exec_args_func_t = std::function<std::vector<int>(
+        const base_prb_t *base_prb, dir_t dir)>;
+
+// A function that initializes the primitive descriptor for a driver. A raw
+// function pointer is used since it is forwarded to `create_primitive`.
+using init_pd_func_t = dnnl_status_t (*)(init_pd_args_t &init_pd_args);
+
+// A function that initializes the reference memory arguments for a driver.
+// Operates on the `base_prb_t` type and downcasts to the concrete driver
+// `prb_t` internally.
+using init_ref_memory_args_func_t
+        = std::function<int(dnn_mem_map_t &ref_mem_map, dnn_mem_map_t &mem_map,
+                dnnl_primitive_t prim, const base_prb_t *base_prb, res_t *res,
+                dnnl_primitive_t prim_ref)>;
+
 // `ref_primitive_t` is an abstraction to connect a graph op and a primitive
 // driver. Its purpose is to translate a graph op into a primitive and execute
 // it. Any primitive driver with template programming work should be done
@@ -72,6 +103,22 @@ private:
     dnnl_driver_t driver_;
     bool is_special_backward_op_;
     ::std::shared_ptr<base_prb_t> prb_;
+    // Driver-specific compare object setup function, assigned in `init_prb`.
+    setup_cmp_func_t setup_cmp_func_ = nullptr;
+    // Driver-specific reference execute function, assigned in `init_prb`.
+    execute_func_t execute_func_ = nullptr;
+    // Driver-specific reference memory args init function, assigned in
+    // `init_prb`.
+    init_ref_memory_args_func_t init_ref_memory_args_func_ = nullptr;
+    // Driver-specific native memory args init function (used when there's no
+    // primitive), assigned in `init_prb`.
+    init_memory_args_native_func_t init_memory_args_native_func_ = nullptr;
+    // Driver-specific supported execution args function, assigned in
+    // `init_prb`. Not set for the custom driver as it has no primitive.
+    supported_exec_args_func_t supported_exec_args_func_ = nullptr;
+    // Driver-specific primitive descriptor init function, assigned in
+    // `init_prb`. Not used for the custom driver as it has no primitive.
+    init_pd_func_t init_pd_func_ = nullptr;
     benchdnn_dnnl_wrapper_t<dnnl_primitive_t> fwd_prim_, prim_;
     dnn_mem_map_t mems_;
     args_t args_;

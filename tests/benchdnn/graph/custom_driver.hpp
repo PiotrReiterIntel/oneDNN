@@ -75,6 +75,10 @@ void init_memory_args(dnn_mem_map_t &mem_map, const base_prb_t *prb,
         const std::vector<int> &supported_exec_args,
         const engine_t &test_engine = get_test_engine());
 
+void init_memory_args_native(const base_prb_t *base_prb,
+        const graph::deserialized_op_t &base_op_ref, dnn_mem_map_t &mem_map,
+        const engine_t &ref_eng);
+
 int init_ref_memory_args(dnn_mem_map_t &ref_mem_map, dnn_mem_map_t &mem_map,
         dnnl_primitive_t prim, const base_prb_t *base_prb, res_t *res,
         dnnl_primitive_t prim_ref = nullptr);
