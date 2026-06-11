@@ -283,7 +283,8 @@ void init_memory_args(dnn_mem_map_t &mem_map, const base_prb_t *base_prb,
 }
 
 int init_ref_memory_args(dnn_mem_map_t &ref_mem_map, dnn_mem_map_t &mem_map,
-        const base_prb_t *base_prb, res_t *res) {
+        dnnl_primitive_t, const base_prb_t *base_prb, res_t *res,
+        dnnl_primitive_t) {
     const auto *prb = static_cast<const prb_t *>(base_prb);
     switch (prb->alg) {
         case GENINDEX:

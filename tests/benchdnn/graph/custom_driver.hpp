@@ -76,7 +76,8 @@ void init_memory_args(dnn_mem_map_t &mem_map, const base_prb_t *prb,
         const engine_t &test_engine = get_test_engine());
 
 int init_ref_memory_args(dnn_mem_map_t &ref_mem_map, dnn_mem_map_t &mem_map,
-        const base_prb_t *prb, res_t *res);
+        dnnl_primitive_t prim, const base_prb_t *base_prb, res_t *res,
+        dnnl_primitive_t prim_ref = nullptr);
 
 void skip_unimplemented_prb(const base_prb_t *prb, res_t *res);
 
