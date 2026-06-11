@@ -202,7 +202,8 @@ dnnl_status_t init_pd(init_pd_args_t &init_pd_args) {
     return dnnl_success;
 }
 
-std::vector<int> supported_exec_args(const prb_t *prb) {
+std::vector<int> supported_exec_args(const base_prb_t *base_prb) {
+    const auto *prb = static_cast<const prb_t *>(base_prb);
     std::vector<int> exec_args;
     switch (prb->alg) {
         case GENINDEX: return ::custom::genindex::exec_args;
@@ -213,8 +214,9 @@ std::vector<int> supported_exec_args(const prb_t *prb) {
     return exec_args;
 }
 
-void setup_cmp(compare::compare_t &cmp, const prb_t *prb, data_kind_t kind,
-        const args_t &ref_args) {
+void setup_cmp(compare::compare_t &cmp, const base_prb_t *base_prb,
+        data_kind_t kind, const args_t &ref_args) {
+    const auto *prb = static_cast<const prb_t *>(base_prb);
     switch (prb->alg) {
         case GENINDEX:
         case TRANSPOSE:
@@ -257,9 +259,10 @@ int fill_mem(dnn_mem_t &mem_dt, dnn_mem_t &mem_fp, int f_min, int f_max) {
     return OK;
 }
 
-void init_memory_args(dnn_mem_map_t &mem_map, const prb_t *prb,
+void init_memory_args(dnn_mem_map_t &mem_map, const base_prb_t *base_prb,
         const std::vector<int> &supported_exec_args,
         const engine_t &test_engine) {
+    const auto *prb = static_cast<const prb_t *>(base_prb);
     for (const auto &exec_arg : supported_exec_args) {
         if (prb->arg_mds_.find(exec_arg) == prb->arg_mds_.end()) {
             assert(!"missing required args");
@@ -280,7 +283,8 @@ void init_memory_args(dnn_mem_map_t &mem_map, const prb_t *prb,
 }
 
 int init_ref_memory_args(dnn_mem_map_t &ref_mem_map, dnn_mem_map_t &mem_map,
-        const prb_t *prb, res_t *res) {
+        const base_prb_t *base_prb, res_t *res) {
+    const auto *prb = static_cast<const prb_t *>(base_prb);
     switch (prb->alg) {
         case GENINDEX:
             SAFE(::custom::genindex::init_ref_memory_args(
@@ -304,9 +308,10 @@ int init_ref_memory_args(dnn_mem_map_t &ref_mem_map, dnn_mem_map_t &mem_map,
     return OK;
 }
 
-void skip_unimplemented_prb(const prb_t *prb, res_t *res) {}
+void skip_unimplemented_prb(const base_prb_t *base_prb, res_t *res) {}
 
-int execute(const prb_t *prb, const args_t &args, res_t *res) {
+int execute(const base_prb_t *base_prb, const args_t &args, res_t *res) {
+    const auto *prb = static_cast<const prb_t *>(base_prb);
     int ret = FAILED;
     switch (prb->alg) {
         case GENINDEX: ret = ::custom::genindex::execute(prb, args, res); break;
