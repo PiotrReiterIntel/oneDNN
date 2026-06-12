@@ -259,19 +259,9 @@ unsigned get_per_core_cache_size(int level) {
             default: return 0U;
         }
     };
-// TODO: George Remove before final PR
-// Enable legacy per-core cache size calculation for comparison/testing
-#define USE_LEGACY_PER_CORE_CACHE_SIZE 0
 #if DNNL_X64
-#if USE_LEGACY_PER_CORE_CACHE_SIZE
-    using namespace x64;
-    if (cpu().getDataCacheLevels() == 0) return guess(level);
-
-    if (level > 0 && (unsigned)level <= cpu().getDataCacheLevels()) {
-        unsigned l = level - 1;
-        return cpu().getDataCacheSize(l) / cpu().getCoresSharingDataCache(l);
-    } else
-        return 0;
+    if (x64::cpu().getDataCacheLevels() == 0) return guess(level);
+    return x64::platform::get_per_core_cache_size(level);
 #elif DNNL_AARCH64
     const auto num_caches
             = static_cast<int>(aarch64::cpu().getLastDataCacheLevel());
@@ -287,14 +277,6 @@ unsigned get_per_core_cache_size(int level) {
     } else {
         return 0;
     }
-#else
-    if (x64::cpu().getDataCacheLevels() == 0) return guess(level);
-    // For hybrid CPUs, the per-core cache size returned will be minimum cache size available across P-cores and E-cores
-    // for the given cache level, which is a more conservative estimate for performance portability. Experiments indicate,
-    // the performance impact of under utilizing cache is less severe than the performance impact of cache misses from
-    // over utilizing cache.
-    return x64::platform::get_per_core_cache_size(level);
-#endif
 #else
     return guess(level);
 #endif
@@ -323,6 +305,8 @@ unsigned get_per_core_cache_size_lpe_core(int level) {
     return x64::platform::get_per_core_cache_size_topology(
             level, x64::platform::cache_sizing_policy_t::lpe_core);
 #else
+    // LPE cores are an Intel x64-only concept; return 0 to signal absence.
+    // Callers should guard with has_lpe_core_cpu() before using this value.
     return 0;
 #endif
 }
