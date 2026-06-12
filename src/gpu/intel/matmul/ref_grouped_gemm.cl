@@ -14,10 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
+#include "gpu/intel/include/post_ops.h"
 #include "gpu/intel/include/types.h"
-#if WITH_POST_OP
-#include "grouped_post_ops.h"
-#endif
 
 // Grouped GEMM OCL reference kernel
 //
@@ -63,13 +61,7 @@ __kernel void ref_grouped_gemm_matmul(__global const SRC_DATA_T *src,
         ,
         __global const float *wei_scales
 #endif
-#if WITH_POST_OP
-        ,
-        __global const BINARY_SCALE_GROUPED_DATA_T *binary_grouped_scale,
-        __global const BINARY_SCALE_DENSE_DATA_T *binary_dense_scale,
-        __global const float *binary_nvfp4_scale
-#endif
-) {
+                POST_OP_ARGS) {
     const int group_id = get_global_id(0);
     const int m = get_global_id(1);
     const int n = get_global_id(2);
@@ -136,10 +128,12 @@ __kernel void ref_grouped_gemm_matmul(__global const SRC_DATA_T *src,
 #endif
 
 #if WITH_POST_OP
-    // Post-ops apply to the 2Dx3D pattern only; there partner_offsets is
-    // dst_offsets (cumulative dst token starts per group).
-    acc = apply_post_ops_chain(acc, m, n, group_id, N, partner_offsets,
-            binary_grouped_scale, binary_dense_scale, binary_nvfp4_scale);
+    // post-ops apply to the 2Dx3D pattern only (row-major SRC/DST), so
+    // the global row index is dst_group_start + m
+    POST_OP_DATA_T po_acc = acc;
+    POST_OP_DATA_T sum_src;
+    APPLY_POST_OPS_SERIAL(po_acc, sum_src, dst_group_start + m, n, 0, 0, 0, 0);
+    acc = po_acc;
 #endif
 
     const long dst_idx

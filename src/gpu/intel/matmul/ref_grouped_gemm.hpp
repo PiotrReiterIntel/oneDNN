@@ -27,7 +27,6 @@
 #include "common/primitive.hpp"
 #include "common/utils.hpp"
 #include "gpu/intel/matmul/config.hpp"
-#include "gpu/intel/matmul/grouped_post_ops_gen.hpp"
 #include "gpu/intel/primitive.hpp"
 #include "gpu/intel/primitive_conf.hpp"
 
@@ -76,10 +75,6 @@ struct ref_grouped_t : public primitive_t {
         data_type_t dst_dt_ = data_type::undef;
         data_type_t wei_dt_ = data_type::undef;
         dim_t group_count_ = 0;
-        bool with_post_op_ = false;
-        po_kind_t po_chain_[3]
-                = {po_kind_t::none, po_kind_t::none, po_kind_t::none};
-        data_type_t binary_scale_dts_[2] = {data_type::undef, data_type::undef};
 
     private:
         bool is_2dby2d_ = false;
@@ -137,10 +132,26 @@ struct ref_grouped_t : public primitive_t {
             VDISPATCH_MATMUL(attr()->zero_points_.has_default_values(),
                     VERBOSE_UNSUPPORTED_ATTR);
 
-            with_post_op_ = !attr()->post_ops_.has_default_values();
-            if (with_post_op_) {
-                CHECK(check_post_op_chain(
-                        *attr(), dst_d, po_chain_, binary_scale_dts_));
+            // Only eltwise and binary post-ops are supported
+            VDISPATCH_MATMUL(
+                    attr()->post_ops_.has_default_values(
+                            {primitive_kind::eltwise, primitive_kind::binary}),
+                    VERBOSE_UNSUPPORTED_POSTOP);
+
+            // Below is to allow using format_any for scalar [1, 1] as binary
+            // post-ops for NVFP4 global scale support
+            const auto &po = attr()->post_ops_;
+            for (int i = 0; i < po.len(); ++i) {
+                auto &e = attr_.post_ops_.entry_[i];
+                if (e.is_binary()) {
+                    const memory_desc_wrapper src1_d(e.binary.src1_desc);
+                    if (src1_d.format_any()) {
+                        VDISPATCH_MATMUL(src1_d.count_non_unit_dims(0),
+                                VERBOSE_UNSUPPORTED_POSTOP);
+                        CHECK(memory_desc_init_by_strides(
+                                e.binary.src1_desc, nullptr));
+                    }
+                }
             }
 
             return status::success;
@@ -173,62 +184,17 @@ struct ref_grouped_t : public primitive_t {
         compute::kernel_ctx_t kernel_ctx;
 
         kernel_ctx.set_data_type(pd()->dst_dt_);
-        const auto &po_chain = pd()->po_chain_;
-        bool with_binary_grouped_scale
-                = (find_po_in_chain(po_chain, po_kind_t::binary_grouped_scale)
-                        != -1);
-        bool with_binary_dense_scale
-                = (find_po_in_chain(po_chain, po_kind_t::binary_dense_scale)
-                        != -1);
-        bool with_binary_nvfp4_scale
-                = (find_po_in_chain(po_chain, po_kind_t::binary_nvfp4_scale)
-                        != -1);
         def_data_type(kernel_ctx, pd()->src_dt_, "SRC");
         def_data_type(kernel_ctx, pd()->wei_dt_, "WEI");
         def_data_type(kernel_ctx, pd()->dst_dt_, "DST");
         def_data_type(kernel_ctx, pd()->desc()->accum_data_type, "ACC");
 
-        kernel_ctx.define_int("WITH_POST_OP", pd()->with_post_op_);
-        kernel_ctx.define_int(
-                "WITH_BINARY_GROUPED_SCALE", with_binary_grouped_scale);
-        kernel_ctx.define_int(
-                "WITH_BINARY_DENSE_SCALE", with_binary_dense_scale);
-        kernel_ctx.define_int(
-                "WITH_BINARY_NVFP4_SCALE", with_binary_nvfp4_scale);
-
-        auto define_binary_scale_dt = [](compute::kernel_ctx_t &ctx,
-                                              data_type_t dt, const char *pfx) {
-            if (dt == data_type::f16)
-                ctx.define_int(std::string(pfx) + "_DT_F16", 1);
-            else if (dt == data_type::bf16)
-                ctx.define_int(std::string(pfx) + "_DT_BF16", 1);
-            else
-                ctx.define_int(std::string(pfx) + "_DT_F32", 1);
-        };
-
-        if (with_binary_grouped_scale) {
-            define_binary_scale_dt(kernel_ctx, pd()->binary_scale_dts_[0],
-                    "BINARY_SCALE_GROUPED");
-        }
-
-        if (with_binary_dense_scale) {
-            define_binary_scale_dt(kernel_ctx, pd()->binary_scale_dts_[1],
-                    "BINARY_SCALE_DENSE");
-        }
-
-        kernel_ctx.add_custom_header("grouped_post_ops.h",
-                generate_post_ops_refgemm_header(*pd()->attr(), po_chain));
+        auto attr_info = attr_info_t::create(pd()->attr());
+        CHECK(def_attr_info(kernel_ctx, attr_info, pd()->attr()->post_ops_,
+                *pd()->dst_md()));
 
         const bool with_bias = pd()->with_bias();
-        const auto &attr_scales = pd()->attr()->scales_;
-        const bool with_src_scales
-                = !attr_scales.has_default_values(DNNL_ARG_SRC);
-        const bool with_wei_scales
-                = !attr_scales.has_default_values(DNNL_ARG_WEIGHTS);
-
         kernel_ctx.define_int("WITH_BIAS", with_bias ? 1 : 0);
-        kernel_ctx.define_int("WITH_SRC_SCALES", with_src_scales ? 1 : 0);
-        kernel_ctx.define_int("WITH_WEI_SCALES", with_wei_scales ? 1 : 0);
         if (with_bias)
             def_data_type(kernel_ctx, pd()->weights_md(1)->data_type, "BIA");
 
