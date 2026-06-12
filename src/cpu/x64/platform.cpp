@@ -181,7 +181,8 @@ unsigned get_per_core_cache_size_legacy(int level) {
 // Called by both get_per_core_cache_size (which may apply the override first)
 // and by topology-info helpers (get_per_core_cache_size_pcore etc.) that must
 // always return true topology values regardless of the active env-var override.
-static unsigned get_per_core_cache_size_for_btype(int level, cache_sizing_policy_t sizing_policy) {
+static unsigned get_per_core_cache_size_for_btype(
+        int level, cache_sizing_policy_t sizing_policy) {
     // Validate level
     if (level < 1 || level > 3) { return 0; }
 
@@ -239,10 +240,12 @@ static unsigned get_per_core_cache_size_for_btype(int level, cache_sizing_policy
 #endif
 }
 
-unsigned get_per_core_cache_size(int level, cache_sizing_policy_t sizing_policy) {
+unsigned get_per_core_cache_size(
+        int level, cache_sizing_policy_t sizing_policy) {
     // Check for env-var override (ONEDNN_CACHE_POLICY / DNNL_CACHE_POLICY).
     // Parsed once at first call; ONEDNN_ takes precedence per library convention.
-    static const auto policy_override = []() -> std::pair<bool, cache_sizing_policy_t> {
+    static const auto policy_override
+            = []() -> std::pair<bool, cache_sizing_policy_t> {
         const std::string val = getenv_string_user("CACHE_POLICY");
         if (val == "min") return {true, cache_sizing_policy_t::min};
         if (val == "max") return {true, cache_sizing_policy_t::max};
@@ -258,7 +261,8 @@ unsigned get_per_core_cache_size(int level, cache_sizing_policy_t sizing_policy)
     return get_per_core_cache_size_for_btype(level, sizing_policy);
 }
 
-unsigned get_per_core_cache_size_topology(int level, cache_sizing_policy_t sizing_policy) {
+unsigned get_per_core_cache_size_topology(
+        int level, cache_sizing_policy_t sizing_policy) {
     return get_per_core_cache_size_for_btype(level, sizing_policy);
 }
 

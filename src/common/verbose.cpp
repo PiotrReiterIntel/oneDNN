@@ -131,8 +131,7 @@ void print_header() noexcept {
                                 / 1024);
             }
         } else {
-            verbose_printf(
-                    "info,cpu,per_core_cache:L1d:%uKB,L2:%uKB,L3:%uKB\n",
+            verbose_printf("info,cpu,per_core_cache:L1d:%uKB,L2:%uKB,L3:%uKB\n",
                     cpu::platform::get_per_core_cache_size(1) / 1024,
                     cpu::platform::get_per_core_cache_size(2) / 1024,
                     cpu::platform::get_per_core_cache_size(3) / 1024);
