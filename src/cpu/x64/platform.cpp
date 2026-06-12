@@ -142,7 +142,9 @@ bool is_hybrid() {
     // xbyak::util::CpuTopology is not supported on macOS; assume non-hybrid.
     return false;
 #else
-    return get_topology_cache().topology.isHybrid();
+    // Use the HYBRID bit from the already-cached Xbyak::Cpu instance
+    // (CPUID leaf 7 EDX[15]) to avoid triggering CpuTopology init.
+    return cpu().has(Xbyak::util::Cpu::tHYBRID);
 #endif
 }
 
@@ -167,9 +169,10 @@ Xbyak::util::CoreType get_core_type() {
     }
 }
 
-// Legacy implementation using Xbyak::util::Cpu CPUID methods
-// This matches the original behavior without OS-specific topology
-unsigned get_per_core_cache_size_legacy(int level) {
+// CPUID-based implementation using Xbyak::util::Cpu (leaf 4).
+// Used on non-hybrid systems (avoiding CpuTopology init cost) and as the
+// fallback for cache_sizing_policy_t::legacy on hybrid systems.
+unsigned get_per_core_cache_size_cpuid(int level) {
     if (level > 0 && (unsigned)level <= cpu().getDataCacheLevels()) {
         unsigned l = level - 1;
         return cpu().getDataCacheSize(l) / cpu().getCoresSharingDataCache(l);
@@ -187,15 +190,15 @@ static unsigned get_per_core_cache_size_for_btype(
     if (level < 1 || level > 3) { return 0; }
 
 #ifdef __APPLE__
-    return get_per_core_cache_size_legacy(level);
+    return get_per_core_cache_size_cpuid(level);
 #else
     if (sizing_policy == cache_sizing_policy_t::legacy) {
-        return get_per_core_cache_size_legacy(level);
+        return get_per_core_cache_size_cpuid(level);
     }
 
-    const auto &topo = get_topology_cache().topology;
-
-    if (!topo.isHybrid()) { return calculate_per_core_cache(0, level); }
+    // Fast path: on non-hybrid systems CpuTopology and legacy CPUID return the
+    // same value.  Avoid the expensive CpuTopology init on non-hybrid systems.
+    if (!is_hybrid()) { return get_per_core_cache_size_cpuid(level); }
 
     size_t pcore_cpu = find_representative_cpu(Xbyak::util::Performance);
     size_t lp_core_cpu = find_representative_cpu(
@@ -235,7 +238,7 @@ static unsigned get_per_core_cache_size_for_btype(
                 m = (std::max)(m, lpe_core_size);
             return m;
         }
-        default: return get_per_core_cache_size_legacy(level);
+        default: return get_per_core_cache_size_cpuid(level);
     }
 #endif
 }
@@ -270,7 +273,7 @@ bool has_lpe_core() {
 #ifdef __APPLE__
     return false;
 #else
-    if (!get_topology_cache().topology.isHybrid()) return false;
+    if (!is_hybrid()) return false;
     return find_representative_cpu(
                    Xbyak::util::Efficient, l3_filter_t::without_l3)
             != SIZE_MAX;
