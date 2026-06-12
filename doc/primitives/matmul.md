@@ -315,12 +315,21 @@ The computation for grouped GEMM with \f$G\f$ groups is defined as:
 
 where \f$m \in [0, M_g)\f$ and \f$M_g\f$ is the number of rows in group \f$g\f$.
 
-The source and destination tensors use [grouped memory format](@ref dev_guide_grouped_mem)
-because the number of tokens per expert varies dynamically in MoE workloads. The
-grouped encoding stores values as concatenated buffers with an offsets array specifying
-group boundaries. Weights are represented as a regular dense 3D tensor
-`[num_groups, K, N]` because all experts have uniform dimensions, making grouped
-encoding unnecessary.
+Two variants are supported defined to which dimension varies across groups.
+Grouped tensors use the [grouped memory format](@ref dev_guide_grouped_mem):
+values are stored as concatenated buffers with an offsets array marking group
+boundaries.
+
+- **Variable token dimension (M)** (e.g., MoE forward pass).
+  The token count varies per expert, so source `[total_M, K]` and destination
+  `[total_M, N]` are grouped (row-major),
+  while weights are represented as a regular dense 3D tensor `[num_groups, K, N]`.
+- **Variable contraction dimension (K)** (e.g., MoE backward pass).
+  The contraction dimension varies per group, so source `[M, total_K]` (col-major)
+  and weights `[total_K, N]` are grouped and with the same partition,
+  while the destination is represented as a regular dense 3D tensor
+  `[num_groups, M, N]`.
+
 
 ### Code Snippet
 
@@ -401,7 +410,7 @@ K-grouped weight scales (e.g., MXFP8 with block size 32):
 ~~~cpp
 attr.set_scales(DNNL_ARG_WEIGHTS, (1 << 0) | (1 << 1) | (1 << 2),
     {32, 1}, memory::data_type::e8m0);
-// Groups are 2D {gK, gN} and are applied to two last dimensions of the tensor
+// Groups are 2D {gK, gN} and are applied to the last two dimensions of the tensor
 // Scale tensor: [num_groups, K/32, N] - dense 3D tensor
 // Layout: standard abc layout
 ~~~
@@ -436,7 +445,7 @@ po.append_binary(algorithm::binary_mul, binary_md);      // then mul
 attr.set_post_ops(po);
 ~~~
 
-Note that dense tensor must follow the same flat concatenated order as the grouped dst.
+Note that the dense tensor must follow the same flat concatenated order as the grouped dst.
 
 Binary multiply with per-row broadcast:
 ~~~cpp
@@ -478,7 +487,6 @@ responsibility to ensure the hint is a valid upper bound.
 ### Implementation Notes
 
 The following are supported:
-- Currently, only single dimension `0` can vary.
 - Source and destination must use identical grouping.
 - Scales attribute for source and weights tensors:
   - Source Scales: row-wise (`mask = (1 << 0)`) and K-grouped
@@ -507,12 +515,13 @@ The following are supported:
   and `[1, 1]` that could be used to apply a global scale for NVFP4.
   For grouped binary tensors, the per-group offsets must match the grouped dst
   partition.
- 
+
  @attention The GPU implementation supports at most one dense binary multiplication
   post-op and at most one grouped binary multiplication post-op. Providing more
   than one of either kind is not supported on GPU.
 
 - Bias supports per-expert shape.
+- Only default attributes are supported for the variable-K variant.
 - Supported on CPU and GPU engines.
 
 #### Supported Data Types
