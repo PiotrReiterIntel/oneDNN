@@ -29,20 +29,11 @@ namespace platform {
 // (e.g. Meteor Lake, Alder Lake, Raptor Lake, Lunar Lake)
 bool is_hybrid();
 
-// Get the Xbyak::util::CoreType of the core the calling thread is running on.
-// To get the core type of a specific core, set thread affinity
-// to that core or use the xbyak_util::CpuTopology methods to query
-// core types directly.
-// Returns Xbyak::util::Performance (P-core) by default on non-hybrid CPUs.
-Xbyak::util::CoreType get_core_type();
-
 enum class cache_sizing_policy_t {
     p_core, // Performance core
     lp_core, // Efficiency core (E-core with shared L3)
     lpe_core, // Low-power efficiency core no L3 cache (e.g. Meteor Lake's SoC tile E-core island).
-    current, // Current core
     min, // (default) used to select the smallest value for all the cores
-    max, // used to select the largest value for all the cores
     legacy // legacy get_per_core_cache_size behavior (uses CPUID doesn't consider hybrid)
 };
 
@@ -61,10 +52,8 @@ bool has_lpe_core();
 //
 // - if cache_sizing_policy_t is p_core/lp_core/lpe_core, the function returns the per-core cache
 //   size for that core type.
-// - if cache_sizing_policy_t is min/max, the function returns the min/max per-core cache
-//   size among all cores
-// - if cache_sizing_policy_t is current, the function returns the cache size of the core
-//   the calling thread is running on.
+// - if cache_sizing_policy_t is min, the function returns the minimum per-core cache
+//   size among all core types (conservative: avoids overflowing smaller caches).
 // - if cache_sizing_policy_t is legacy, the function behaves like the legacy
 //   get_per_core_cache_size(level) function using CPUID with no consideration of
 //   hybrid CPUs.

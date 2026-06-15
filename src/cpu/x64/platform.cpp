@@ -118,21 +118,6 @@ uint32_t calculate_per_core_cache(size_t cpu_index, int level) {
     return cache.size / sharing_cores;
 }
 
-// Probe whether the currently executing CPU has an L3 cache via CPUID leaf 0x4.
-// CPUID.04H enumerates cache levels via ECX subleaf; EAX[4:0]==0 signals the
-// end of the list, EAX[7:5] holds the cache level (3 == L3).
-// This is safe to call on any x86 CPU that supports leaf 0x4 (all modern Intel).
-bool current_cpu_has_l3() {
-    for (uint32_t subleaf = 0; subleaf < 8; subleaf++) {
-        uint32_t regs[4] = {0};
-        Xbyak::util::Cpu::getCpuidEx(0x4, subleaf, regs);
-        uint32_t cache_type = regs[0] & 0x1F; // EAX[4:0]: 0 = no more caches
-        if (cache_type == 0) break;
-        uint32_t cache_level = (regs[0] >> 5) & 0x7; // EAX[7:5]
-        if (cache_level == 3) return true;
-    }
-    return false;
-}
 #endif // !__APPLE__
 
 } // anonymous namespace
@@ -146,27 +131,6 @@ bool is_hybrid() {
     // (CPUID leaf 7 EDX[15]) to avoid triggering CpuTopology init.
     return cpu().has(Xbyak::util::Cpu::tHYBRID);
 #endif
-}
-
-Xbyak::util::CoreType get_core_type() {
-    // These correspond to values returned in CPUID leaf 0x1A core-type field.
-    constexpr uint32_t CPUID_CORE_TYPE_ATOM = 0x20; // Intel Atom / E-core
-    constexpr uint32_t CPUID_CORE_TYPE_CORE = 0x40; // Intel Core / P-core
-    uint32_t regs[4] = {0};
-
-    // Get max basic CPUID leaf
-    Xbyak::util::Cpu::getCpuidEx(0x0, 0, regs);
-    uint32_t max_basic_leaf = regs[0];
-    // If 0x1A is not supported, default to Performance (P-core)
-    if (max_basic_leaf < 0x1A) return Xbyak::util::Performance;
-
-    Xbyak::util::Cpu::getCpuidEx(0x1A, 0, regs);
-    uint32_t core_type_field = (regs[0] >> 24) & 0xFF;
-    switch (core_type_field) {
-        case CPUID_CORE_TYPE_ATOM: return Xbyak::util::Efficient;
-        case CPUID_CORE_TYPE_CORE: return Xbyak::util::Performance;
-        default: return Xbyak::util::Performance;
-    }
 }
 
 // CPUID-based implementation using Xbyak::util::Cpu (leaf 4).
@@ -184,7 +148,7 @@ unsigned get_per_core_cache_size_cpuid(int level) {
 // Called by both get_per_core_cache_size (which may apply the override first)
 // and by topology-info helpers (get_per_core_cache_size_pcore etc.) that must
 // always return true topology values regardless of the active env-var override.
-static unsigned get_per_core_cache_size_for_btype(
+static unsigned get_per_core_cache_size_for_policy(
         int level, cache_sizing_policy_t sizing_policy) {
     // Validate level
     if (level < 1 || level > 3) { return 0; }
@@ -219,23 +183,10 @@ static unsigned get_per_core_cache_size_for_btype(
         case cache_sizing_policy_t::p_core: return pcore_size;
         case cache_sizing_policy_t::lp_core: return lp_core_size;
         case cache_sizing_policy_t::lpe_core: return lpe_core_size;
-        case cache_sizing_policy_t::current: {
-            Xbyak::util::CoreType current_ctype = get_core_type();
-            if (current_ctype == Xbyak::util::Performance) return pcore_size;
-            if (lpe_core_cpu != SIZE_MAX && !current_cpu_has_l3())
-                return lpe_core_size;
-            return lp_core_size;
-        }
         case cache_sizing_policy_t::min: {
             uint32_t m = (std::min)(pcore_size, lp_core_size);
             if (lpe_core_cpu != SIZE_MAX && lpe_core_size > 0)
                 m = (std::min)(m, lpe_core_size);
-            return m;
-        }
-        case cache_sizing_policy_t::max: {
-            uint32_t m = (std::max)(pcore_size, lp_core_size);
-            if (lpe_core_cpu != SIZE_MAX && lpe_core_size > 0)
-                m = (std::max)(m, lpe_core_size);
             return m;
         }
         default: return get_per_core_cache_size_cpuid(level);
@@ -251,22 +202,20 @@ unsigned get_per_core_cache_size(
             = []() -> std::pair<bool, cache_sizing_policy_t> {
         const std::string val = getenv_string_user("CACHE_POLICY");
         if (val == "min") return {true, cache_sizing_policy_t::min};
-        if (val == "max") return {true, cache_sizing_policy_t::max};
         if (val == "p_core") return {true, cache_sizing_policy_t::p_core};
         if (val == "lp_core") return {true, cache_sizing_policy_t::lp_core};
         if (val == "lpe_core") return {true, cache_sizing_policy_t::lpe_core};
-        if (val == "current") return {true, cache_sizing_policy_t::current};
         if (val == "legacy") return {true, cache_sizing_policy_t::legacy};
         return {false, cache_sizing_policy_t::min};
     }();
     if (policy_override.first) sizing_policy = policy_override.second;
 
-    return get_per_core_cache_size_for_btype(level, sizing_policy);
+    return get_per_core_cache_size_for_policy(level, sizing_policy);
 }
 
 unsigned get_per_core_cache_size_topology(
         int level, cache_sizing_policy_t sizing_policy) {
-    return get_per_core_cache_size_for_btype(level, sizing_policy);
+    return get_per_core_cache_size_for_policy(level, sizing_policy);
 }
 
 bool has_lpe_core() {
