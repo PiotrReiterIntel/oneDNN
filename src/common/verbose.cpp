@@ -110,21 +110,16 @@ void print_header() noexcept {
                 dnnl_get_max_threads());
         verbose_printf("info,cpu,isa:%s\n", cpu::platform::get_isa_info());
         if (cpu::platform::is_hybrid_cpu()) {
-            verbose_printf(
-                    "info,cpu,per_core_cache,pcore:L1d:%uKB,L2:%uKB,L3:%"
-                    "uKB\n",
+            verbose_printf("info,cpu,per_core_cache,pcore:L1d:%uKB,L2:%uKB,L3:%uKB\n",
                     cpu::platform::get_per_core_cache_size_pcore(1) / 1024,
                     cpu::platform::get_per_core_cache_size_pcore(2) / 1024,
                     cpu::platform::get_per_core_cache_size_pcore(3) / 1024);
-            verbose_printf(
-                    "info,cpu,per_core_cache,lp_core:L1d:%uKB,L2:%uKB,L3:%"
-                    "uKB\n",
+            verbose_printf("info,cpu,per_core_cache,lp_core:L1d:%uKB,L2:%uKB,L3:%uKB\n",
                     cpu::platform::get_per_core_cache_size_lp_core(1) / 1024,
                     cpu::platform::get_per_core_cache_size_lp_core(2) / 1024,
                     cpu::platform::get_per_core_cache_size_lp_core(3) / 1024);
             if (cpu::platform::has_lpe_core_cpu()) {
-                verbose_printf(
-                        "info,cpu,per_core_cache,lpe_core:L1d:%uKB,L2:%uKB\n",
+                verbose_printf("info,cpu,per_core_cache,lpe_core:L1d:%uKB,L2:%uKB\n",
                         cpu::platform::get_per_core_cache_size_lpe_core(1)
                                 / 1024,
                         cpu::platform::get_per_core_cache_size_lpe_core(2)
@@ -142,9 +137,7 @@ void print_header() noexcept {
         {
             const std::string policy = getenv_string_user("CACHE_POLICY");
             if (!policy.empty()) {
-                verbose_printf(
-                        "info,cpu,cache_budget,policy=%s:L1d:%uKB,L2:%uKB"
-                        ",L3:%uKB\n",
+                verbose_printf("info,cpu,cache_budget,policy=%s:L1d:%uKB,L2:%uKB,L3:%uKB\n",
                         policy.c_str(),
                         cpu::platform::get_per_core_cache_size(1) / 1024,
                         cpu::platform::get_per_core_cache_size(2) / 1024,
