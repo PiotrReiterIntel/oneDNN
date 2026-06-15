@@ -63,13 +63,15 @@ bool has_lpe_core();
 // same cache topology, all LPE-cores have the same cache topology. The LPE-core
 // type is a subset of the E-core type, so the presence of LPE-cores is determined
 // by checking for E-cores with no L3 cache.
-unsigned get_per_core_cache_size(int level, cache_sizing_policy_t sizing_policy = cache_sizing_policy_t::min);
+unsigned get_per_core_cache_size(int level,
+        cache_sizing_policy_t sizing_policy = cache_sizing_policy_t::min);
 
 // Topology-info variant: always returns the true topology value for the given
 // sizing_policy, bypassing any active ONEDNN_CACHE_POLICY env-var override.
 // Use this for diagnostic/verbose output where the topology itself is wanted,
 // not the value that was actually applied to blocking decisions.
-unsigned get_per_core_cache_size_topology(int level, cache_sizing_policy_t sizing_policy);
+unsigned get_per_core_cache_size_topology(
+        int level, cache_sizing_policy_t sizing_policy);
 
 } // namespace platform
 } // namespace x64
