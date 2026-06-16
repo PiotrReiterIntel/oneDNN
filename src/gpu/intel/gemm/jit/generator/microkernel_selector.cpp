@@ -57,6 +57,7 @@ std::vector<Protocol::Argument> arguments(const GEMMOptions &o) {
     auto LocalPointer = StructuredType::LocalPointer;
     auto GlobalPointer = StructuredType::GlobalPointer;
     auto s32 = StructuredType::s32;
+    auto u32 = StructuredType::u32;
 
     static Protocol::Argument args[] = {
             {"a", In, GlobalPointer},
@@ -67,9 +68,9 @@ std::vector<Protocol::Argument> arguments(const GEMMOptions &o) {
             {"m", In, s32},
             {"n", In, s32},
             {"k", In, s32},
-            {"i0", In, s32},
-            {"j0", In, s32},
-            {"h0", In, s32},
+            {"i0", In, u32},
+            {"j0", In, u32},
+            {"h0", In, u32},
             {"local_id_m", In, s32},
             {"local_id_n", In, s32},
     };
@@ -123,9 +124,9 @@ InterfaceHandler GEMMOptions::generateInterface(HW hw) const {
     interface.newArgument("m", DataType::d);
     interface.newArgument("n", DataType::d);
     interface.newArgument("k", DataType::d);
-    interface.newArgument("i0", DataType::d);
-    interface.newArgument("j0", DataType::d);
-    interface.newArgument("h0", DataType::d);
+    interface.newArgument("i0", DataType::ud);
+    interface.newArgument("j0", DataType::ud);
+    interface.newArgument("h0", DataType::ud);
     interface.newArgument("local_id_m", DataType::d);
     interface.newArgument("local_id_n", DataType::d);
     if (kParallelLocal)    interface.newArgument("local_id_k", DataType::d);
