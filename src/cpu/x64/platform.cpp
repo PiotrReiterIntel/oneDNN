@@ -123,9 +123,9 @@ uint32_t calculate_per_core_cache(size_t cpu_index, int level) {
 
 // Collect physical cache size, sharing count, and SMT width for one level.
 struct cache_level_info_t {
-    uint32_t total_kb;     // total physical cache capacity in KB
-    size_t sharing_cores;  // number of physical cores sharing this instance
-    size_t smt_width;      // logical threads per physical core (HT width)
+    uint32_t total_kb; // total physical cache capacity in KB
+    size_t sharing_cores; // number of physical cores sharing this instance
+    size_t smt_width; // logical threads per physical core (HT width)
 };
 
 cache_level_info_t get_cache_level_info(size_t cpu_index, int level) {
@@ -154,8 +154,8 @@ void print_hybrid_cache_debuginfo_once(size_t pcore_cpu, size_t lp_core_cpu,
     static std::atomic_flag printed = ATOMIC_FLAG_INIT;
     if (printed.test_and_set()) return;
 
-    auto print_core_line = [](const char *tag, size_t cpu_idx,
-                                    bool include_l3) {
+    auto print_core_line
+            = [](const char *tag, size_t cpu_idx, bool include_l3) {
         auto l1 = get_cache_level_info(cpu_idx, 1);
         auto l2 = get_cache_level_info(cpu_idx, 2);
         char buf[256];
@@ -164,23 +164,22 @@ void print_hybrid_cache_debuginfo_once(size_t pcore_cpu, size_t lp_core_cpu,
                 "cpu,debuginfo,platform,%s,L1d:%uKB", tag, l1.total_kb);
         if (l2.sharing_cores > 1)
             n += snprintf(buf + n, (int)sizeof(buf) - n,
-                    ",L2:%uKB(%zucores,%uKB/core)",
-                    l2.total_kb, l2.sharing_cores,
-                    l2.total_kb / (uint32_t)l2.sharing_cores);
+                    ",L2:%uKB(%zucores,%uKB/core)", l2.total_kb,
+                    l2.sharing_cores, l2.total_kb / (uint32_t)l2.sharing_cores);
         else
-            n += snprintf(buf + n, (int)sizeof(buf) - n,
-                    ",L2:%uKB", l2.total_kb);
+            n += snprintf(
+                    buf + n, (int)sizeof(buf) - n, ",L2:%uKB", l2.total_kb);
         if (include_l3) {
             auto l3 = get_cache_level_info(cpu_idx, 3);
             if (l3.total_kb > 0) {
                 if (l3.sharing_cores > 1)
                     n += snprintf(buf + n, (int)sizeof(buf) - n,
-                            ",L3:%uMB(%zucores,%uKB/core)",
-                            l3.total_kb / 1024, l3.sharing_cores,
+                            ",L3:%uMB(%zucores,%uKB/core)", l3.total_kb / 1024,
+                            l3.sharing_cores,
                             l3.total_kb / (uint32_t)l3.sharing_cores);
                 else
-                    n += snprintf(buf + n, (int)sizeof(buf) - n,
-                            ",L3:%uMB", l3.total_kb / 1024);
+                    n += snprintf(buf + n, (int)sizeof(buf) - n, ",L3:%uMB",
+                            l3.total_kb / 1024);
             }
         }
         snprintf(buf + n, (int)sizeof(buf) - n, ",smt:%zu\n", l1.smt_width);
@@ -235,8 +234,8 @@ void print_hybrid_cache_debuginfo_once(size_t pcore_cpu, size_t lp_core_cpu,
             break;
     }
     verbose_printf(verbose_t::debuginfo,
-            "cpu,debuginfo,platform,%s,L1d:%uKB,L2:%uKB,L3:%uKB\n",
-            policy_tag, l1_used / 1024, l2_used / 1024, l3_used / 1024);
+            "cpu,debuginfo,platform,%s,L1d:%uKB,L2:%uKB,L3:%uKB\n", policy_tag,
+            l1_used / 1024, l2_used / 1024, l3_used / 1024);
 }
 
 #endif // !__APPLE__
@@ -280,8 +279,8 @@ static void print_cache_debuginfo_once() {
     char buf[256];
     int n = 0;
     unsigned nlevels = cpu().getDataCacheLevels();
-    n += snprintf(buf + n, (int)sizeof(buf) - n,
-            "cpu,debuginfo,platform,cache");
+    n += snprintf(
+            buf + n, (int)sizeof(buf) - n, "cpu,debuginfo,platform,cache");
     for (unsigned li = 0; li < nlevels && li < 3; li++) {
         uint32_t total_kb = cpu().getDataCacheSize(li) / 1024;
         uint32_t sharing = cpu().getCoresSharingDataCache(li);
@@ -292,23 +291,63 @@ static void print_cache_debuginfo_once() {
             // L3: show total in MB, per-core in KB
             if (sharing > 1)
                 n += snprintf(buf + n, (int)sizeof(buf) - n,
-                        ",%s:%uMB(%ucores,%uKB/core)",
-                        label, total_kb / 1024, sharing, per_core_kb);
+                        ",%s:%uMB(%ucores,%uKB/core)", label, total_kb / 1024,
+                        sharing, per_core_kb);
             else
-                n += snprintf(buf + n, (int)sizeof(buf) - n,
-                        ",%s:%uMB", label, total_kb / 1024);
+                n += snprintf(buf + n, (int)sizeof(buf) - n, ",%s:%uMB", label,
+                        total_kb / 1024);
         } else {
             if (sharing > 1)
                 n += snprintf(buf + n, (int)sizeof(buf) - n,
-                        ",%s:%uKB(%ucores,%uKB/core)",
-                        label, total_kb, sharing, per_core_kb);
+                        ",%s:%uKB(%ucores,%uKB/core)", label, total_kb, sharing,
+                        per_core_kb);
             else
-                n += snprintf(buf + n, (int)sizeof(buf) - n,
-                        ",%s:%uKB", label, total_kb);
+                n += snprintf(buf + n, (int)sizeof(buf) - n, ",%s:%uKB", label,
+                        total_kb);
         }
     }
     snprintf(buf + n, (int)sizeof(buf) - n, ",smt:%u\n", smt);
     verbose_printf(verbose_t::debuginfo, "%s", buf);
+}
+
+// Cached per-core cache sizes for all core types and levels on hybrid systems.
+// Computed once at first use; all fields are bytes (not KB).
+// levels[0]=L1, levels[1]=L2, levels[2]=L3 (0 if not present).
+// lpe_core_cpu == SIZE_MAX means no LPE core present; lpe_core[] is all zero.
+struct hybrid_core_cache_sizes_t {
+    size_t pcore_cpu;
+    size_t lp_core_cpu;
+    size_t lpe_core_cpu;
+    uint32_t pcore[3];
+    uint32_t lp_core[3];
+    uint32_t lpe_core[3];
+};
+
+hybrid_core_cache_sizes_t &get_hybrid_core_cache_sizes() {
+    static hybrid_core_cache_sizes_t s = []() {
+        hybrid_core_cache_sizes_t c {};
+        c.pcore_cpu = find_representative_cpu(Xbyak::util::Performance);
+        c.lp_core_cpu = find_representative_cpu(
+                Xbyak::util::Efficient, l3_filter_t::with_l3);
+        c.lpe_core_cpu = find_representative_cpu(
+                Xbyak::util::Efficient, l3_filter_t::without_l3);
+
+        // if a core type is not found, fallback to CPU 0 which should have all caches present
+        if (c.pcore_cpu == SIZE_MAX) c.pcore_cpu = 0;
+        // fallback to p-core if no E-core with L3 found
+        if (c.lp_core_cpu == SIZE_MAX) c.lp_core_cpu = c.pcore_cpu;
+        // all uses of lpe_core_cpu should check for SIZE_MAX before using it
+
+        for (int lvl = 1; lvl <= 3; lvl++) {
+            c.pcore[lvl - 1] = calculate_per_core_cache(c.pcore_cpu, lvl);
+            c.lp_core[lvl - 1] = calculate_per_core_cache(c.lp_core_cpu, lvl);
+            c.lpe_core[lvl - 1] = (c.lpe_core_cpu != SIZE_MAX)
+                    ? calculate_per_core_cache(c.lpe_core_cpu, lvl)
+                    : 0;
+        }
+        return c;
+    }();
+    return s;
 }
 
 // Inner implementation: resolves sizing_policy to a cache size with no env-var override.
@@ -332,35 +371,20 @@ static unsigned get_per_core_cache_size_for_policy(
         return get_per_core_cache_size_cpuid(level);
     }
 
-    size_t pcore_cpu = find_representative_cpu(Xbyak::util::Performance);
-    size_t lp_core_cpu = find_representative_cpu(
-            Xbyak::util::Efficient, l3_filter_t::with_l3);
-    size_t lpe_core_cpu = find_representative_cpu(
-            Xbyak::util::Efficient, l3_filter_t::without_l3);
-
-    // if a core type is not found, fallback to CPU 0 which should have all caches present
-    if (pcore_cpu == SIZE_MAX) pcore_cpu = 0;
-    // fallback to p-core if no E-core with L3 found
-    if (lp_core_cpu == SIZE_MAX) lp_core_cpu = pcore_cpu;
-    // all uses of lpe_core_cpu should check for SIZE_MAX before using it
-
-    uint32_t pcore_size = calculate_per_core_cache(pcore_cpu, level);
-    uint32_t lp_core_size = calculate_per_core_cache(lp_core_cpu, level);
-    uint32_t lpe_core_size = (lpe_core_cpu != SIZE_MAX)
-            ? calculate_per_core_cache(lpe_core_cpu, level)
-            : 0;
+    const auto &cs = get_hybrid_core_cache_sizes();
+    const int li = level - 1; // 0-indexed
 
     print_hybrid_cache_debuginfo_once(
-            pcore_cpu, lp_core_cpu, lpe_core_cpu, sizing_policy);
+            cs.pcore_cpu, cs.lp_core_cpu, cs.lpe_core_cpu, sizing_policy);
 
     switch (sizing_policy) {
-        case cache_sizing_policy_t::p_core: return pcore_size;
-        case cache_sizing_policy_t::lp_core: return lp_core_size;
-        case cache_sizing_policy_t::lpe_core: return lpe_core_size;
+        case cache_sizing_policy_t::p_core: return cs.pcore[li];
+        case cache_sizing_policy_t::lp_core: return cs.lp_core[li];
+        case cache_sizing_policy_t::lpe_core: return cs.lpe_core[li];
         case cache_sizing_policy_t::min: {
-            uint32_t m = (std::min)(pcore_size, lp_core_size);
-            if (lpe_core_cpu != SIZE_MAX && lpe_core_size > 0)
-                m = (std::min)(m, lpe_core_size);
+            uint32_t m = (std::min)(cs.pcore[li], cs.lp_core[li]);
+            if (cs.lpe_core_cpu != SIZE_MAX && cs.lpe_core[li] > 0)
+                m = (std::min)(m, cs.lpe_core[li]);
             return m;
         }
         default: return get_per_core_cache_size_cpuid(level);
@@ -392,9 +416,7 @@ bool has_lpe_core() {
     return false;
 #else
     if (!is_hybrid()) return false;
-    return find_representative_cpu(
-                   Xbyak::util::Efficient, l3_filter_t::without_l3)
-            != SIZE_MAX;
+    return get_hybrid_core_cache_sizes().lpe_core_cpu != SIZE_MAX;
 #endif
 }
 
