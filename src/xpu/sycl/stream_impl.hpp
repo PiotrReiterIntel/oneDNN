@@ -75,6 +75,26 @@ public:
 
     void register_deps(::sycl::handler &cgh) const;
 
+    status_t init_verbose_profiler(engine_kind_t kind) override {
+        use_verbose_profiler_ = false;
+        if (!get_verbose(verbose_t::exec_profile)) return status::success;
+        if (kind != engine_kind::gpu) return status::success;
+        // verbose profiling support is only for in-order queues
+        if (flags() & stream_flags::out_of_order) return status::success;
+        use_verbose_profiler_ = true;
+
+        // if the queue is set, verbose profiling is disabled for
+        // unsupported backends
+        if (!queue_) return status::success;
+
+        const auto backend = queue_->get_backend();
+        if (!utils::one_of(backend, ::sycl::backend::ext_oneapi_level_zero,
+                    ::sycl::backend::opencl))
+            use_verbose_profiler_ = false;
+
+        return status::success;
+    }
+
     static status_t init_flags(unsigned *flags, ::sycl::queue &queue) {
         *flags = queue.is_in_order() ? stream_flags::in_order
                                      : stream_flags::out_of_order;
