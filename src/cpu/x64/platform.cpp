@@ -148,8 +148,8 @@ cache_level_info_t get_cache_level_info(size_t cpu_index, int level) {
 // Private levels:          L{N}:{total}KB
 // smt:{N} at end of each line: logical threads per physical core (HT width).
 // Final line: per-core sizes for the active sizing policy.
-void print_hybrid_cache_debuginfo_once(size_t pcore_cpu, size_t lp_core_cpu,
-        size_t lpe_core_cpu, cache_sizing_policy_t sizing_policy) {
+void print_hybrid_cache_debuginfo_once(
+        size_t pcore_cpu, size_t lp_core_cpu, size_t lpe_core_cpu) {
     if (get_verbose(verbose_t::debuginfo) < 1) return;
     static std::atomic_flag printed = ATOMIC_FLAG_INIT;
     if (printed.test_and_set()) return;
@@ -191,63 +191,23 @@ void print_hybrid_cache_debuginfo_once(size_t pcore_cpu, size_t lp_core_cpu,
     if (lpe_core_cpu != SIZE_MAX)
         print_core_line("lpe_core_cache", lpe_core_cpu, false);
 
-    // Summary line: per-core sizes for the active sizing policy.
-    const char *policy_tag = "per_core_cache(min)";
-    uint32_t l1_used, l2_used, l3_used;
-    switch (sizing_policy) {
-        case cache_sizing_policy_t::p_core:
-            policy_tag = "per_core_cache(p_core)";
-            l1_used = calculate_per_core_cache(pcore_cpu, 1);
-            l2_used = calculate_per_core_cache(pcore_cpu, 2);
-            l3_used = calculate_per_core_cache(pcore_cpu, 3);
-            break;
-        case cache_sizing_policy_t::lp_core:
-            policy_tag = "per_core_cache(lp_core)";
-            l1_used = calculate_per_core_cache(lp_core_cpu, 1);
-            l2_used = calculate_per_core_cache(lp_core_cpu, 2);
-            l3_used = calculate_per_core_cache(lp_core_cpu, 3);
-            break;
-        case cache_sizing_policy_t::lpe_core:
-            policy_tag = "per_core_cache(lpe_core)";
-            l1_used = (lpe_core_cpu != SIZE_MAX)
-                    ? calculate_per_core_cache(lpe_core_cpu, 1)
-                    : 0;
-            l2_used = (lpe_core_cpu != SIZE_MAX)
-                    ? calculate_per_core_cache(lpe_core_cpu, 2)
-                    : 0;
-            l3_used = 0; // lpe_core has no L3
-            break;
-        case cache_sizing_policy_t::legacy:
-            policy_tag = "per_core_cache(legacy)";
-            l1_used = cpu().getDataCacheSize(0)
-                    / (std::max)(cpu().getCoresSharingDataCache(0), 1u);
-            l2_used = (cpu().getDataCacheLevels() >= 2)
-                    ? cpu().getDataCacheSize(1)
-                            / (std::max)(cpu().getCoresSharingDataCache(1), 1u)
-                    : 0;
-            l3_used = (cpu().getDataCacheLevels() >= 3)
-                    ? cpu().getDataCacheSize(2)
-                            / (std::max)(cpu().getCoresSharingDataCache(2), 1u)
-                    : 0;
-            break;
-        default: // min
-            l1_used = (std::min)(calculate_per_core_cache(pcore_cpu, 1),
-                    calculate_per_core_cache(lp_core_cpu, 1));
-            l2_used = (std::min)(calculate_per_core_cache(pcore_cpu, 2),
-                    calculate_per_core_cache(lp_core_cpu, 2));
-            l3_used = (std::min)(calculate_per_core_cache(pcore_cpu, 3),
-                    calculate_per_core_cache(lp_core_cpu, 3));
-            if (lpe_core_cpu != SIZE_MAX) {
-                l1_used = (std::min)(
-                        l1_used, calculate_per_core_cache(lpe_core_cpu, 1));
-                l2_used = (std::min)(
-                        l2_used, calculate_per_core_cache(lpe_core_cpu, 2));
-                // lpe_core has no L3 -- excluded to avoid zeroing L3 budget
-            }
-            break;
+    // Summary line: min per-core cache size across all core types.
+    uint32_t l1_used = (std::min)(calculate_per_core_cache(pcore_cpu, 1),
+            calculate_per_core_cache(lp_core_cpu, 1));
+    uint32_t l2_used = (std::min)(calculate_per_core_cache(pcore_cpu, 2),
+            calculate_per_core_cache(lp_core_cpu, 2));
+    uint32_t l3_used = (std::min)(calculate_per_core_cache(pcore_cpu, 3),
+            calculate_per_core_cache(lp_core_cpu, 3));
+    if (lpe_core_cpu != SIZE_MAX) {
+        l1_used = (std::min)(
+                l1_used, calculate_per_core_cache(lpe_core_cpu, 1));
+        l2_used = (std::min)(
+                l2_used, calculate_per_core_cache(lpe_core_cpu, 2));
+        // lpe_core has no L3 -- excluded to avoid zeroing L3 budget
     }
     verbose_printf(verbose_t::debuginfo,
-            "cpu,debuginfo,platform,%s,L1d:%uKB,L2:%uKB,L3:%uKB\n", policy_tag,
+            "cpu,debuginfo,platform,per_core_cache(min),L1d:%uKB,L2:%uKB,L3:%"
+            "uKB\n",
             l1_used / 1024, l2_used / 1024, l3_used / 1024);
 }
 
@@ -267,8 +227,7 @@ bool is_hybrid() {
 }
 
 // CPUID-based implementation using Xbyak::util::Cpu (leaf 4).
-// Used on non-hybrid systems (avoiding CpuTopology init cost) and as the
-// fallback for cache_sizing_policy_t::legacy on hybrid systems.
+// Used on non-hybrid systems to avoid the expensive CpuTopology init.
 unsigned get_per_core_cache_size_cpuid(int level) {
     if (level > 0 && (unsigned)level <= cpu().getDataCacheLevels()) {
         unsigned l = level - 1;
@@ -363,29 +322,13 @@ hybrid_core_cache_sizes_t &get_hybrid_core_cache_sizes() {
     return s;
 }
 
-// Inner implementation: resolves sizing_policy to a cache size with no env-var override.
-// Called by get_per_core_cache_size after the env-var override has been applied.
-static unsigned get_per_core_cache_size_for_policy(
-        int level, cache_sizing_policy_t sizing_policy) {
-    // Validate level
+unsigned get_per_core_cache_size(int level) {
     if (level < 1 || level > 3) { return 0; }
 
 #ifdef __APPLE__
     return get_per_core_cache_size_cpuid(level);
 #else
-    if (sizing_policy == cache_sizing_policy_t::legacy) {
-        if (!is_hybrid()) {
-            print_cache_debuginfo_once();
-        } else if (get_verbose(verbose_t::debuginfo) >= 1) {
-            const auto &cs = get_hybrid_core_cache_sizes();
-            print_hybrid_cache_debuginfo_once(cs.pcore_cpu, cs.lp_core_cpu,
-                    cs.lpe_core_cpu, sizing_policy);
-        }
-        return get_per_core_cache_size_cpuid(level);
-    }
-
-    // Fast path: on non-hybrid systems CpuTopology and legacy CPUID return the
-    // same value.  Avoid the expensive CpuTopology init on non-hybrid systems.
+    // Fast path: on non-hybrid systems avoid the expensive CpuTopology init.
     if (!is_hybrid()) {
         print_cache_debuginfo_once();
         return get_per_core_cache_size_cpuid(level);
@@ -395,40 +338,13 @@ static unsigned get_per_core_cache_size_for_policy(
     const int li = level - 1; // 0-indexed
 
     print_hybrid_cache_debuginfo_once(
-            cs.pcore_cpu, cs.lp_core_cpu, cs.lpe_core_cpu, sizing_policy);
+            cs.pcore_cpu, cs.lp_core_cpu, cs.lpe_core_cpu);
 
-    switch (sizing_policy) {
-        case cache_sizing_policy_t::p_core: return cs.pcore[li];
-        case cache_sizing_policy_t::lp_core: return cs.lp_core[li];
-        case cache_sizing_policy_t::lpe_core: return cs.lpe_core[li];
-        case cache_sizing_policy_t::min: {
-            uint32_t m = (std::min)(cs.pcore[li], cs.lp_core[li]);
-            if (cs.lpe_core_cpu != SIZE_MAX && cs.lpe_core[li] > 0)
-                m = (std::min)(m, cs.lpe_core[li]);
-            return m;
-        }
-        default: return get_per_core_cache_size_cpuid(level);
-    }
+    uint32_t m = (std::min)(cs.pcore[li], cs.lp_core[li]);
+    if (cs.lpe_core_cpu != SIZE_MAX && cs.lpe_core[li] > 0)
+        m = (std::min)(m, cs.lpe_core[li]);
+    return m;
 #endif
-}
-
-unsigned get_per_core_cache_size(
-        int level, cache_sizing_policy_t sizing_policy) {
-    // Check for env-var override (ONEDNN_CACHE_POLICY / DNNL_CACHE_POLICY).
-    // Parsed once at first call; ONEDNN_ takes precedence per library convention.
-    static const auto policy_override
-            = []() -> std::pair<bool, cache_sizing_policy_t> {
-        const std::string val = getenv_string_user("CACHE_POLICY");
-        if (val == "min") return {true, cache_sizing_policy_t::min};
-        if (val == "p_core") return {true, cache_sizing_policy_t::p_core};
-        if (val == "lp_core") return {true, cache_sizing_policy_t::lp_core};
-        if (val == "lpe_core") return {true, cache_sizing_policy_t::lpe_core};
-        if (val == "legacy") return {true, cache_sizing_policy_t::legacy};
-        return {false, cache_sizing_policy_t::min};
-    }();
-    if (policy_override.first) sizing_policy = policy_override.second;
-
-    return get_per_core_cache_size_for_policy(level, sizing_policy);
 }
 
 bool has_lpe_core() {

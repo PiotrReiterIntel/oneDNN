@@ -29,42 +29,15 @@ namespace platform {
 // (e.g. Meteor Lake, Alder Lake, Raptor Lake, Lunar Lake)
 bool is_hybrid();
 
-enum class cache_sizing_policy_t {
-    p_core, // Performance core
-    lp_core, // Efficiency core (E-core with shared L3)
-    lpe_core, // Low-power efficiency core no L3 cache (e.g. Meteor Lake's SoC tile E-core island).
-    min, // (default) used to select the smallest value for all the cores
-    legacy // legacy get_per_core_cache_size behavior (uses CPUID doesn't consider hybrid)
-};
-
 // Returns true if this hybrid CPU has a low-power E-core island (LP E-cores),
 // i.e. Efficient cores that have no L3 cache. Only meaningful on hybrid CPUs.
 bool has_lpe_core();
 
-// Use Xbyak_utils cache topology methods to determine the per-core cache size.
-//
-// This avoids using older CPUID-based methods which can result in inaccurate
-// values on hybrid CPUs.
-//
-// The cache_sizing_policy_t argument specifies the behavior of the query on hybrid CPUs.
-// On non-hybrid CPUs, the cache_sizing_policy_t argument is ignored and the function
-// returns the per-core cache size as normal.
-//
-// - if cache_sizing_policy_t is p_core/lp_core/lpe_core, the function returns the per-core cache
-//   size for that core type.
-// - if cache_sizing_policy_t is min, the function returns the minimum per-core cache
-//   size among all core types (conservative: avoids overflowing smaller caches).
-// - if cache_sizing_policy_t is legacy, the function behaves like the legacy
-//   get_per_core_cache_size(level) function using CPUID with no consideration of
-//   hybrid CPUs.
-//
-// Assumption each core type on a system is homogeneous in terms of cache
-// topology e.g. all P-cores have the same cache topology, all LP-cores have the
-// same cache topology, all LPE-cores have the same cache topology. The LPE-core
-// type is a subset of the E-core type, so the presence of LPE-cores is determined
-// by checking for E-cores with no L3 cache.
-unsigned get_per_core_cache_size(int level,
-        cache_sizing_policy_t sizing_policy = cache_sizing_policy_t::min);
+// Returns the per-core cache size in bytes for the given level (1=L1d, 2=L2, 3=L3).
+// On non-hybrid systems uses CPUID leaf 4 directly.
+// On hybrid systems uses CpuTopology and returns the minimum per-core size across
+// all core types (conservative: avoids overflowing the smallest cache present).
+unsigned get_per_core_cache_size(int level);
 
 } // namespace platform
 } // namespace x64
