@@ -169,6 +169,10 @@ enum {
     // Per-(M,N) f32 compensation tile for int8 grouped quantization with
     // src and/or wei zero points (consumed by apply_per_mn_compensation).
     key_brgemm_primitive_per_mn_comp,
+    // Per-thread scratch (T/S int32 reductions + per-axis zp/scale gathers)
+    // owned by `per_mn_comp_kernel_t`. Sized via
+    // `per_mn_comp_kernel_t::per_thread_scratch_bytes`.
+    key_brgemm_primitive_per_mn_comp_scratch,
     key_brgemm_primitive_buffer_reduce,
     key_concat_iptrs,
     key_concat_istrides,

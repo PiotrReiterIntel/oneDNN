@@ -24,6 +24,7 @@
 #include "cpu/x64/injectors/jit_uni_postops_injector.hpp"
 #include "cpu/x64/matmul/amx_blocking_heuristics.hpp"
 #include "cpu/x64/matmul/brgemm_matmul_utils.hpp"
+#include "cpu/x64/matmul/jit_brgemm_matmul_per_mn_comp.hpp"
 #include "cpu/x64/matmul/postops_estimator.hpp"
 #include "oneapi/dnnl/dnnl_debug.h"
 
@@ -2678,8 +2679,8 @@ void init_aux_values(brgemm_matmul_conf_t &bgmmc,
     bgmmc.has_zero_point_a = bgmmc.src_zp_type != brgemm_broadcast_t::none;
     bgmmc.has_zero_point_b = bgmmc.wei_zp_type != brgemm_broadcast_t::none;
     bgmmc.has_zero_point_c = bgmmc.dst_zp_type != brgemm_broadcast_t::none;
-
-    bgmmc.with_per_mn_compensation = false;
+    bgmmc.with_per_mn_compensation = bgmmc.with_int8_grouped_quantization
+            && (bgmmc.has_zero_point_a || bgmmc.has_zero_point_b);
     bgmmc.post_ops_applicable = one_of(true, bgmmc.with_sum, bgmmc.with_bias,
             bgmmc.with_src_scales,
             bgmmc.with_wei_scales && !bgmmc.apply_scales_in_buffer_b,
@@ -2762,6 +2763,14 @@ void init_scratchpad(memory_tracking::registrar_t &scratchpad,
         scratchpad.book(key_brgemm_primitive_per_mn_comp,
                 static_cast<size_t>(bgmmc.nthr) * per_thr_elems,
                 types::data_type_size(f32));
+
+        // Per-thread scratch for the JIT kernel (T/S reductions + per-axis
+        // zp/scale gathers). Sized by the kernel from `bgmmc`.
+        const size_t per_thr_scratch_bytes
+                = per_mn_comp_kernel_t::per_thread_scratch_bytes(bgmmc);
+        scratchpad.book(key_brgemm_primitive_per_mn_comp_scratch,
+                static_cast<size_t>(bgmmc.nthr) * per_thr_scratch_bytes,
+                sizeof(char), 64);
     }
 
     if (is_superset(bgmmc.isa, avx512_core_amx))

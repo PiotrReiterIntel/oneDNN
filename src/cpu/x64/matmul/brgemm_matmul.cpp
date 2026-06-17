@@ -546,6 +546,10 @@ status_t brgemm_matmul_t<isa>::init(engine_t *engine) {
         CHECK(sparse_decompress_kernel_->create_kernel());
     }
 
+    if (bgmmc.with_per_mn_compensation) {
+        CHECK(per_mn_comp_kernel_t::create(per_mn_comp_kernel_, &bgmmc));
+    }
+
     return status::success;
 }
 
@@ -581,8 +585,8 @@ status_t brgemm_matmul_t<isa>::execute_body(const exec_ctx_t &ctx) const {
     const auto dst_d = ctx.memory_mdw(DNNL_ARG_DST, pd()->dst_md());
     matmul_helper_t helper(src_d, weights_d, dst_d);
 
-    auto brgmm_ctx_ptr
-            = std::make_shared<brg_matmul_exec_ctx_t>(ctx, pd(), helper);
+    auto brgmm_ctx_ptr = std::make_shared<brg_matmul_exec_ctx_t>(
+            ctx, pd(), helper, per_mn_comp_kernel_.get());
 
     const int num_threads
             = brgmm_ctx_ptr->get_num_threads_for_parallelization();
@@ -1474,8 +1478,9 @@ void brgemm_matmul_t<isa>::accumulate(
 
 template <cpu_isa_t isa>
 struct brgemm_matmul_t<isa>::brg_matmul_exec_ctx_t {
-    brg_matmul_exec_ctx_t(
-            const exec_ctx_t &ctx, const pd_t *pd, matmul_helper_t &helper)
+    brg_matmul_exec_ctx_t(const exec_ctx_t &ctx, const pd_t *pd,
+            matmul_helper_t &helper,
+            const per_mn_comp_kernel_t *per_mn_comp_kernel)
         : bgmmc_(pd->get_brgemm_matmul_conf())
         , src_d_(pd->src_md())
         , wei_d_(pd->weights_md())
@@ -1484,7 +1489,8 @@ struct brgemm_matmul_t<isa>::brg_matmul_exec_ctx_t {
         , data_B_ptr_(CTX_IN_MEM(const char *, DNNL_ARG_WEIGHTS))
         , data_C_ptr_(CTX_OUT_MEM(char *, DNNL_ARG_DST))
         , data_reduce_ptr_(CTX_OUT_MEM(char *, DNNL_ARG_REDUCE))
-        , is_thread_chunks_exec_order_horizontal_(true) {
+        , is_thread_chunks_exec_order_horizontal_(true)
+        , per_mn_comp_kernel_(per_mn_comp_kernel) {
 
         const memory_desc_wrapper weights_d(pd->weights_md(0));
         if (bgmmc_.packed_sparse_weights) {
@@ -1574,6 +1580,16 @@ struct brgemm_matmul_t<isa>::brg_matmul_exec_ctx_t {
                 ? scratchpad.template get<float>(
                           key_brgemm_primitive_per_mn_comp)
                 : nullptr;
+        per_mn_comp_scratch_ptr_ = bgmmc.with_per_mn_compensation
+                ? scratchpad.template get<char>(
+                          key_brgemm_primitive_per_mn_comp_scratch)
+                : nullptr;
+        per_mn_comp_scratch_layout_
+                = per_mn_comp_kernel_t::scratch_layout_t::from_conf(bgmmc_);
+
+        if (bgmmc.with_per_mn_compensation) {
+            per_mn_cache_.assign(bgmmc.nthr, per_mn_cache_entry_t {});
+        }
 
         post_ops_binary_rhs_arg_vec_ = binary_injector::prepare_binary_args(
                 pd->attr()->post_ops_, ctx);
@@ -2287,9 +2303,62 @@ struct brgemm_matmul_t<isa>::brg_matmul_exec_ctx_t {
             const char *B_data_batch_ptr, int m_kernel_size,
             int n_kernel_size) const {
         if (!bgmmc_.with_per_mn_compensation) return;
+        assert(per_mn_comp_kernel_ != nullptr);
+
         const dim_t m = get_M_idx(m_blk_idx, true);
         const dim_t n = get_N_idx(n_blk_idx, true);
-#TODO : placeholder for per_mn_compensation.
+
+        // Apply batch offset to wei_zp_ptr_ (analogous to get_wei_zp_ptr).
+        const void *wei_zp_base = wei_zp_ptr_;
+        if (bgmmc_.has_zero_point_b && bgmmc_.wei_zp_batch_stride > 0
+                && !bgmmc_.is_wei_zp_common) {
+            const int b = get_bb_idx(b_idx, bgmmc_.bcast_B_desc);
+            const auto dt_sz = types::data_type_size(bgmmc_.wei_zp_dt);
+            const auto elems_per_byte
+                    = one_of(bgmmc_.wei_zp_dt, data_type::s4, data_type::u4)
+                    ? 2
+                    : 1;
+            wei_zp_base = reinterpret_cast<const char *>(wei_zp_base)
+                    + b * bgmmc_.wei_zp_batch_stride * dt_sz / elems_per_byte;
+        }
+
+        // Apply batch offset to wei_scales_ (analogous to wei_zp).
+        const void *wei_scales_base = wei_scales_;
+        if (wei_scales_ != nullptr && bgmmc_.wei_scales_batch_stride > 0
+                && !bgmmc_.is_wei_scale_common) {
+            const int b = get_bb_idx(b_idx, bgmmc_.bcast_B_desc);
+            wei_scales_base = reinterpret_cast<const char *>(wei_scales_)
+                    + b * bgmmc_.wei_scales_batch_stride
+                            * bgmmc_.wei_scales_dt_sz;
+        }
+
+        per_mn_comp_kernel_t::ctx_t kctx;
+        kctx.src_batch_ptr = A_data_batch_ptr;
+        kctx.wei_batch_ptr = B_data_batch_ptr;
+        kctx.src_zp_ptr = bgmmc_.has_zero_point_a ? src_zp_ptr_ : nullptr;
+        kctx.wei_zp_ptr = bgmmc_.has_zero_point_b ? wei_zp_base : nullptr;
+        kctx.src_scales_ptr = src_scales_;
+        kctx.wei_scales_ptr = wei_scales_base;
+        kctx.delta_ptr = get_per_mn_comp_ptr(ithr);
+        kctx.m_base = m;
+        kctx.n_base = n;
+        kctx.M_blk = m_kernel_size;
+        kctx.N_blk = n_kernel_size;
+
+        auto &cache = per_mn_cache_[ithr];
+        kctx.s_buf_valid
+                = (cache.b_idx == b_idx && cache.n_blk_idx == n_blk_idx);
+
+        // Per-thread scratch sub-pointers.
+        char *thread_scratch = per_mn_comp_scratch_ptr_
+                + static_cast<size_t>(ithr)
+                        * per_mn_comp_scratch_layout_.total_bytes;
+        per_mn_comp_scratch_layout_.pointers_in(kctx, thread_scratch);
+
+        (*per_mn_comp_kernel_)(&kctx);
+
+        cache.b_idx = b_idx;
+        cache.n_blk_idx = n_blk_idx;
     }
 
     int32_t *get_zp_a_compensation_ptr(
@@ -2640,6 +2709,20 @@ private:
     // zp + 128-shift correction subtracted from the accumulator by the
     // brgemm kernel via apply_per_mn_compensation.
     float *per_mn_comp_ptr_;
+    // Per-thread scratch (T/S/z/s buffers) owned by `per_mn_comp_kernel_t`.
+    char *per_mn_comp_scratch_ptr_;
+    per_mn_comp_kernel_t::scratch_layout_t per_mn_comp_scratch_layout_;
+
+    // C1 cache: last (b_idx, n_blk_idx) seen by
+    // fill_per_mn_compensation on each thread. Identical (b, nb) on the
+    // next call means S_buf is still valid in the per-thread scratch and
+    // emit_s_reduce can be skipped. Padded to 64 B to avoid false
+    // sharing across worker threads.
+    struct alignas(64) per_mn_cache_entry_t {
+        int b_idx = -1;
+        int n_blk_idx = -1;
+    };
+    mutable std::vector<per_mn_cache_entry_t> per_mn_cache_;
 
     const void *src_zp_ptr_;
     const void *wei_zp_ptr_;
@@ -2655,6 +2738,9 @@ private:
     int nthr_, nthr_k_, nthr_bmn_, num_threads_used_;
     // Horizontal order means first process N (load) dim then M (bcast) dim.
     bool is_thread_chunks_exec_order_horizontal_;
+    // Owned by `brgemm_matmul_t::init`. Non-null iff
+    // `bgmmc_.with_per_mn_compensation` is set.
+    const per_mn_comp_kernel_t *per_mn_comp_kernel_;
     int last_brgemm_batch_size_;
 
     dim_t M_;

@@ -285,9 +285,8 @@ struct brgemm_matmul_conf_t {
 
     data_type_t src_zp_dt = data_type::undef;
 
-    // Per-K src zero-points scaffolding. Populated on the grouped int8
-    // enabling branch; dormant (default-initialized) here so the per-mn
-    // compensation infrastructure compiles without behavior change.
+    // Per-K src zero-points: stride between K-group slots (in
+    // elements). Used by the per-mn compensation src ZP gather.
     bool is_src_zp_per_k = false;
     dim_t src_zp_k_gsize = 0;
 
@@ -297,8 +296,7 @@ struct brgemm_matmul_conf_t {
     bool is_wei_zp_common = false;
     data_type_t wei_zp_dt = data_type::undef;
 
-    // Batched (4D) per-tensor grouped scales/ZP plane stride. Dormant on
-    // this branch; populated by the grouped int8 enabling branch.
+    // Batched (4D) per-tensor grouped scales/ZP plane stride.
     dim_t wei_zp_batch_stride = 0;
     dim_t wei_scales_batch_stride = 0;
 
