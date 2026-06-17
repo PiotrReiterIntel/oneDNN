@@ -160,6 +160,19 @@ status_t brgemm_matmul_t<isa>::pd_t::init(engine_t *engine) {
             = utils::one_of(wei_dt, data_type::f4_e2m1, data_type::f4_e3m0);
     const bool is_f32_with_int_wei
             = src_dt == f32 && one_of(wei_dt, s8, u8, s4, u4) && dst_dt == f32;
+    // int8 grouped (dynamic) quantization: int8 src x {s4,u4,s8,u8} wei,
+    // dst in {f16,bf16,f32}, with any grouped scales/ZP attribute (or int4
+    // weights, which are always per-OC grouped).
+    const auto &attr_scales = attr()->scales_;
+    const auto &attr_zps = attr()->zero_points_;
+    const bool has_grouped_quant_attrs = utils::one_of(wei_dt, s4, u4)
+            || !attr_scales.get(DNNL_ARG_SRC).has_default_groups()
+            || !attr_scales.get(DNNL_ARG_WEIGHTS).has_default_groups()
+            || !attr_zps.get(DNNL_ARG_SRC).has_default_groups()
+            || !attr_zps.get(DNNL_ARG_WEIGHTS).has_default_groups();
+    const bool with_int8_grouped_quantization = one_of(src_dt, u8, s8)
+            && one_of(wei_dt, s4, u4, s8) && one_of(dst_dt, f16, bf16, f32)
+            && has_grouped_quant_attrs;
 
     auto check_bias = [&]() -> bool {
         const auto bia_dt = weights_md(1)->data_type;
@@ -204,8 +217,8 @@ status_t brgemm_matmul_t<isa>::pd_t::init(engine_t *engine) {
             if (is_runtime_value(N())) ok = false;
         }
         // Impl suppports f32 scales only for non-weight decompression
-        if (!(is_bf16_with_int_wei || is_f16_with_int_wei
-                    || is_f32_with_int_wei)) {
+        if (!(is_bf16_with_int_wei || is_f16_with_int_wei || is_f32_with_int_wei
+                    || with_int8_grouped_quantization)) {
             ok = ok && one_of(asc.get_data_type(DNNL_ARG_SRC), undef, f32);
             ok = ok && one_of(asc.get_data_type(DNNL_ARG_WEIGHTS), undef, f32);
             ok = ok && one_of(asc.get_data_type(DNNL_ARG_DST), undef, f32);
@@ -236,14 +249,23 @@ status_t brgemm_matmul_t<isa>::pd_t::init(engine_t *engine) {
         return ok;
     };
 
-    auto check_attr_zero_points = [&](bool allow_multiple_wei_zp) -> bool {
+    auto check_attr_zero_points
+            = [&](bool allow_multiple_wei_zp,
+                      bool allow_grouped_src_zp = false) -> bool {
         const auto &zp = attr()->zero_points_;
-        static const std::vector<int> supported_args {
-                DNNL_ARG_SRC, DNNL_ARG_DST};
-        for (int arg : supported_args) {
-            if (!zp.has_default_values(arg)) {
-                const int mask = zp.get_mask(arg);
-                if (mask > 0) return false;
+        if (!zp.has_default_values(DNNL_ARG_DST)) {
+            const int mask = zp.get_mask(DNNL_ARG_DST);
+            if (mask > 0) return false;
+        }
+        if (!zp.has_default_values(DNNL_ARG_SRC)) {
+            const auto mask = zp.get_mask(DNNL_ARG_SRC);
+            if (allow_grouped_src_zp) {
+                const int mk_mask = src_qmask_M() + src_qmask_K();
+                const bool zp_over_batch = (mask & mk_mask) != mask;
+                const bool mask_ok = (mask & ~mk_mask) == 0;
+                return !(zp_over_batch && batch() > 1) && mask_ok;
+            } else {
+                return mask == 0;
             }
         }
         if (!zp.has_default_values(DNNL_ARG_WEIGHTS)) {
@@ -261,7 +283,8 @@ status_t brgemm_matmul_t<isa>::pd_t::init(engine_t *engine) {
     };
     const bool problem_dt_correct = one_of(true, is_f4, is_int8, is_f8, is_bf16,
             is_f32, is_f16, is_f32_f16, is_f32_bf16, is_bf16_with_int_wei,
-            is_f16_with_int_wei, is_f32_with_int_wei);
+            is_f16_with_int_wei, is_f32_with_int_wei,
+            with_int8_grouped_quantization);
 
     auto src_d = memory_desc_wrapper(src_md_);
     auto weights_d = memory_desc_wrapper(weights_md_);
@@ -301,8 +324,11 @@ status_t brgemm_matmul_t<isa>::pd_t::init(engine_t *engine) {
             VERBOSE_UNSUPPORTED_POSTOP);
 
     VDISPATCH_MATMUL(check_attr_scales(), VERBOSE_UNSUPPORTED_SCALES_CFG);
-    VDISPATCH_MATMUL(check_attr_zero_points(is_bf16_with_int_wei
-                             || is_f16_with_int_wei || is_f32_with_int_wei),
+    VDISPATCH_MATMUL(
+            check_attr_zero_points(is_bf16_with_int_wei || is_f16_with_int_wei
+                            || is_f32_with_int_wei
+                            || with_int8_grouped_quantization,
+                    with_int8_grouped_quantization),
             VERBOSE_UNSUPPORTED_ZP_CFG);
     VDISPATCH_MATMUL(check_bias(), VERBOSE_UNSUPPORTED_BIAS_CFG);
     VDISPATCH_MATMUL(check_reduce(), VERBOSE_UNSUPPORTED_FEATURE,
@@ -316,6 +342,18 @@ status_t brgemm_matmul_t<isa>::pd_t::init(engine_t *engine) {
     VDISPATCH_MATMUL(IMPLICATION((is_f32_f16 || is_f32_bf16) && isa == avx2,
                              bgmmc_.N % 8 == 0),
             "unsupported configuration");
+
+    // ZP per M,N compensation doesn't support strided cases yet.
+    if (bgmmc_.with_per_mn_compensation) {
+        VDISPATCH_MATMUL(bgmmc_.A_strides[0] == 1 && bgmmc_.B_strides[0] == 1,
+                VERBOSE_UNSUPPORTED_TAG);
+        const bool wei_is_subbyte = utils::one_of(wei_dt, s4, u4);
+        if (wei_is_subbyte) {
+            VDISPATCH_MATMUL(
+                    bgmmc_.N_blk % 2 == 0 && bgmmc_.B_strides[1] % 2 == 0,
+                    VERBOSE_UNSUPPORTED_TAG);
+        }
+    }
 
     const float alpha = 1.0;
     const float beta = 1.0;
@@ -811,8 +849,9 @@ void brgemm_matmul_t<isa>::compute_kernel(
     // only) and {1,1} (epilogue).
     auto execute_brgemm = [&](const brgemm_kernel_t *kernel, const int brg_idx,
                                   const int bs, const bool need_postops) {
-        const bool per_k_scales
-                = bgmmc.is_wei_scale_per_k && !bgmmc.apply_scales_in_buffer_b;
+        const bool per_k_scales = bgmmc.is_src_scale_per_k
+                || (bgmmc.is_wei_scale_per_k
+                        && !bgmmc.apply_scales_in_buffer_b);
         const auto k = k_blk_idx * bgmmc.K_blk * bgmmc.brgemm_batch_size;
         const auto m = brgmm_ctx.get_M_idx(m_blk_idx, true);
 
