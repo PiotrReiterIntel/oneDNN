@@ -602,6 +602,10 @@ status_t brgemm_matmul_conf_utils_t::set_or_check_B_tag(memory_desc_t &B_md,
             bgmmc.wei_tag = get_gemv_B_tag(B_md);
             assert(bgmmc.wei_tag != format_tag::undef
                 && "if bgmmc.is_gemv is true the format tag must be defined");
+        } else if (bgmmc.is_xf16_fp8) {
+            bgmmc.wei_tag = memory_desc_matches_one_of_tag(B_md,
+                    blocked_64n_B_layout_tag, blocked_48n_B_layout_tag,
+                    blocked_32n_B_layout_tag, blocked_16n_B_layout_tag);
         } else {
             bgmmc.wei_tag = blocked_B_layouts_allowed && !bgmmc.is_runtime_N
                             && !bgmmc.is_int4_weights
