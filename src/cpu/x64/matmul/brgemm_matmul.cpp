@@ -392,6 +392,17 @@ status_t brgemm_matmul_t<isa>::pd_t::init(engine_t *engine) {
         auto LDD = bgmmc_.LDD;
         if (bgmmc_.with_wei_decompression && bgmmc_.has_zero_point_b)
             brg.skip_zp_b_compensation = true;
+        // The per-(M, N) compensation tile carries the full src+wei zero
+        // point correction in f32 (post per-K scales). Skip the kernel's
+        // built-in vpaddd-based zp_a path so it isn't applied twice.
+        if (bgmmc_.with_per_mn_compensation) {
+            brg.with_per_mn_compensation = true;
+            brg.skip_zp_a_compensation = true;
+            // Same reasoning for wei zp: the per-(M,N) delta already folds
+            // the full wei-zp correction. Bypass the legacy `vaddps` of
+            // `zp_comp_b` so the wei-zp contribution is not double-applied.
+            brg.skip_zp_b_compensation = true;
+        }
         brg.skip_wei_scales = bgmmc_.apply_scales_in_buffer_b;
         // Fill up the scales info in case it's computing in brgemm
         if (!brg.skip_wei_scales && bgmmc_.with_wei_scales) {
@@ -813,7 +824,9 @@ void brgemm_matmul_t<isa>::compute_kernel(
             }
             const void *src_scales = bgmmc.is_src_scale_per_k
                     ? brgmm_ctx.get_src_scales_ptr(m, k)
-                    : nullptr;
+                    : (bgmmc.is_wei_scale_per_k && bgmmc.with_src_scales
+                                      ? brgmm_ctx.get_src_scales_ptr()
+                                      : nullptr);
             const void *wei_scales = bgmmc.is_wei_scale_per_k
                             && !bgmmc.apply_scales_in_buffer_b
                     ? brgmm_ctx.get_wei_scales_ptr(n, k, b_idx)
@@ -856,6 +869,17 @@ void brgemm_matmul_t<isa>::compute_kernel(
         const size_t first_mb_matrix_addr_off
                 = batch_first_dim_idx * (M * N) + (dst_row_logical_off * N + n);
 
+        // Symmetric src/wei zp + 128-shift compensation tile (driver-side).
+        if (bgmmc.with_per_mn_compensation) {
+            brgmm_ctx.fill_per_mn_compensation(ithr, b_idx, m_blk_idx,
+                    n_blk_idx, A_data_batch_ptr, B_data_batch_ptr,
+                    brgmm_ctx.get_M_kernel_size(m_blk_idx),
+                    brgmm_ctx.get_N_kernel_size(n_blk_idx));
+        }
+        const void *per_mn_comp = bgmmc.with_per_mn_compensation
+                ? static_cast<const void *>(brgmm_ctx.get_per_mn_comp_ptr(ithr))
+                : nullptr;
+
         const brgemm_post_ops_data_t post_ops_data {
                 /*bias=*/static_cast<const void *>(ptr_bias),
                 /*binary_post_ops_rhs=*/post_ops_binary_rhs_arg_vec.data(),
@@ -867,7 +891,7 @@ void brgemm_matmul_t<isa>::compute_kernel(
                 /*c_zp_values=*/brgmm_ctx.get_zp_c_ptr(),
                 /*skip_accumulation=*/false, /*zp_a_val=*/1,
                 /*do_only_comp=*/false, /*do_only_zp_a_val=*/false, src_scales,
-                wei_scales, dst_scales};
+                wei_scales, dst_scales, /*a_zp_values=*/nullptr, per_mn_comp};
 
         brgemm_kernel_execute_postops(kernel, bs, addr_batch, (void *)ptr_C,
                 (void *)ptr_D, post_ops_data, scratch, &leading_dimensions);
@@ -1544,6 +1568,11 @@ struct brgemm_matmul_t<isa>::brg_matmul_exec_ctx_t {
         zero_point_b_compensations_ptr_ = bgmmc.has_zero_point_b
                 ? scratchpad.template get<int32_t>(
                           key_brgemm_primitive_zp_comp_b)
+                : nullptr;
+
+        per_mn_comp_ptr_ = bgmmc.with_per_mn_compensation
+                ? scratchpad.template get<float>(
+                          key_brgemm_primitive_per_mn_comp)
                 : nullptr;
 
         post_ops_binary_rhs_arg_vec_ = binary_injector::prepare_binary_args(
@@ -2238,6 +2267,31 @@ struct brgemm_matmul_t<isa>::brg_matmul_exec_ctx_t {
 
     const void *get_zp_c_ptr() const { return dst_zp_ptr_; }
 
+    // Returns the per-thread f32 tile (M_blk × LDC elements) used by the
+    // per-(M, N) compensation kernel hook. Caller fills it just before the
+    // final K-block brgemm call.
+    float *get_per_mn_comp_ptr(int ithr) const {
+        if (!bgmmc_.with_per_mn_compensation) return nullptr;
+        // Per-thread tile mirrors buffer_c's stripe layout for AMX:
+        // ceil(N_blk / LDC) stripes of M_blk × LDC floats.
+        const size_t per_thr_elems = static_cast<size_t>(bgmmc_.M_blk)
+                * static_cast<size_t>(rnd_up(bgmmc_.N_blk, bgmmc_.LDC));
+        return per_mn_comp_ptr_ + ithr * per_thr_elems;
+    }
+
+    // Fills the per-thread per-(M, N) compensation tile with the symmetric
+    // src+wei zero-point correction delta[m,n] for the (m_blk, n_blk) tile of
+    // batch `b_idx`.
+    void fill_per_mn_compensation(int ithr, int b_idx, int m_blk_idx,
+            int n_blk_idx, const char *A_data_batch_ptr,
+            const char *B_data_batch_ptr, int m_kernel_size,
+            int n_kernel_size) const {
+        if (!bgmmc_.with_per_mn_compensation) return;
+        const dim_t m = get_M_idx(m_blk_idx, true);
+        const dim_t n = get_N_idx(n_blk_idx, true);
+#TODO : placeholder for per_mn_compensation.
+    }
+
     int32_t *get_zp_a_compensation_ptr(
             int ithr, int b_idx, int n_blk_idx) const {
         if (!bgmmc_.has_zero_point_a) return nullptr;
@@ -2582,6 +2636,10 @@ private:
     int32_t *zero_point_a_compensations_ptr_;
     int32_t *zero_point_b_compensations_ptr_;
     int32_t *reorder_zp_a_comp_ptr_;
+    // Per-thread f32 tile (size M_blk × LDC). Holds the symmetric src/wei
+    // zp + 128-shift correction subtracted from the accumulator by the
+    // brgemm kernel via apply_per_mn_compensation.
+    float *per_mn_comp_ptr_;
 
     const void *src_zp_ptr_;
     const void *wei_zp_ptr_;

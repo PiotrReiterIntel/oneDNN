@@ -244,6 +244,10 @@ struct brgemm_matmul_conf_t {
     bool is_f4_via_convert = false;
     bool is_tf32 = false;
     bool with_int8_grouped_quantization = false;
+    // Enables the driver-side per-(M, N) f32 compensation tile that captures
+    // the symmetric src/wei zero-point + 128-shift correction in the grouped
+    // int8 quantization path. Mirrors brgemm_desc_t::with_per_mn_compensation.
+    bool with_per_mn_compensation = false;
     bool req_wei_vnni_downconvert = false;
     bool is_runtime_M = false;
     bool is_runtime_N = false;
@@ -281,14 +285,28 @@ struct brgemm_matmul_conf_t {
 
     data_type_t src_zp_dt = data_type::undef;
 
+    // Per-K src zero-points scaffolding. Populated on the grouped int8
+    // enabling branch; dormant (default-initialized) here so the per-mn
+    // compensation infrastructure compiles without behavior change.
+    bool is_src_zp_per_k = false;
+    dim_t src_zp_k_gsize = 0;
+
     dim_t wei_zp_k_gsize = 0;
     bool is_wei_zp_per_k = false;
     bool is_wei_zp_per_n = false;
     bool is_wei_zp_common = false;
     data_type_t wei_zp_dt = data_type::undef;
 
+    // Batched (4D) per-tensor grouped scales/ZP plane stride. Dormant on
+    // this branch; populated by the grouped int8 enabling branch.
+    dim_t wei_zp_batch_stride = 0;
+    dim_t wei_scales_batch_stride = 0;
+
     dim_t zp_a_comp_shift_n;
     dim_t zp_a_comp_elems_per_thr;
+    // Stride between per-K-group zp_a compensation slots (in elements).
+    // Used by the int8 grouped quantization src ZP post-brgemm path.
+    dim_t zp_a_comp_k_str = 0;
 
     dim_t zp_b_comp_result_shift_m;
     dim_t zp_b_comp_buffer_start;
