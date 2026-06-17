@@ -21,6 +21,7 @@
 #include <limits>
 #include <map>
 #include <mutex>
+#include <string>
 #include <vector>
 
 #include "common/c_types_map.hpp"
@@ -118,6 +119,91 @@ protected:
     uint64_t stamp_;
     const stream_t *stream_;
     void (*callback_)(uint64_t, uint64_t) = nullptr;
+};
+
+// The verbose profiler logs primitive profiling information using device-
+// measured execution times without host-to-device synchronization overhead or
+// blocking stream.wait() calls. It operates asynchronously by polling device
+// events to track primitive completion status.
+// During primitive execution, the profiler groups and registers kernel events
+// for each primitive with the associated profiling metadata. During each
+// primitive post-exec hook, it polls previously registered events to identify
+// completed primitives and logs their timing info. Pending primitives remain
+// in the events_ list until detected as complete in subsequent polling cycles.
+// During profilerdestruction, any remaining primitives are checked and waited
+// for to ensure no executions are left unlogged.
+// This profiler is intended to be thread-local via thread_local_storage_t,
+// ensuring thread-safety for multi-threaded execution environments. Each
+// thread maintains its own profiler instance and event tracking state,
+// operating independently from other stream profilers during primitive
+// execution.
+struct verbose_profiler_t {
+    verbose_profiler_t(const stream_t *stream) : stream_(stream) {}
+
+    virtual ~verbose_profiler_t() = default;
+
+    struct prim_profile_data_t {
+        double start_ms = 0.0;
+        std::string pd_info;
+        std::vector<std::shared_ptr<xpu::event_t>> prim_events;
+    };
+
+    void reset() { events_.clear(); }
+
+    // This allows force-pausing the profiler for unsupported scenarios -
+    // pausing action is localized to each thread for multi-threaded
+    // execution
+    virtual bool is_active() const { return true; }
+
+    // The profiler operates through a multi-step event tracking workflow:
+    // 1. stream->before_exec_hook() calls update_event_list()
+    //    to add a new entry for the current primitive
+    // 2. During primitive execution, register_event() adds device
+    //    events to the latest primitive entry.
+    // 3. add_to_pending_primitive_list() stores profiling metadata
+    //    (start_ms, pd_info) for the registered primitive
+    // 4. stream->after_exec_hook() calls check_for_completed_primitives()
+    //    to poll events and log completed primitives
+    // 5. Incomplete primitives remain in events_ until detected as
+    //    complete in future polling cycles
+    // This asynchronous workflow allows tracking multiple concurrent
+    // primitives without blocking execution.
+    void update_event_list() { events_.emplace_back(); }
+
+    /* appends primitive event to the last primitive entry in events_*/
+    void register_event(const std::shared_ptr<xpu::event_t> &event) {
+        if (!event || events_.empty()) return;
+        events_.back().prim_events.push_back(event);
+    }
+
+    /* populates profiling metadata for the last primitive entry in events_ */
+    status_t add_to_pending_primitive_list(
+            double start_ms, const std::string &pd_info);
+
+    // Completed primitive executions are periodically checked and logged
+    // during after_exec_hook() calls and during stream destruction.
+    // The profiler does not wait for pending events to complete
+    // and instead prints them at the next concurrent after_exec_hook()
+    // call.
+    void check_for_completed_primitives();
+
+    // This is invoked during profiler destruction to account
+    // for any pending primitives that have not yet been logged.
+    void wait_for_pending_primitives();
+
+    virtual status_t get_aggregate_exec_time(
+            size_t index, double &duration_ms) const
+            = 0;
+    virtual bool is_event_complete(
+            const std::shared_ptr<xpu::event_t> &event) const
+            = 0;
+    virtual void wait_for_event_completion(
+            const std::shared_ptr<xpu::event_t> &event) const
+            = 0;
+
+protected:
+    const stream_t *stream_;
+    std::vector<prim_profile_data_t> events_;
 };
 
 } // namespace xpu
