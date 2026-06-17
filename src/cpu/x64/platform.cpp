@@ -217,7 +217,20 @@ void print_hybrid_cache_debuginfo_once(size_t pcore_cpu, size_t lp_core_cpu,
                     : 0;
             l3_used = 0; // lpe_core has no L3
             break;
-        default: // min (and legacy fallback)
+        case cache_sizing_policy_t::legacy:
+            policy_tag = "per_core_cache(legacy)";
+            l1_used = cpu().getDataCacheSize(0)
+                    / (std::max)(cpu().getCoresSharingDataCache(0), 1u);
+            l2_used = (cpu().getDataCacheLevels() >= 2)
+                    ? cpu().getDataCacheSize(1)
+                            / (std::max)(cpu().getCoresSharingDataCache(1), 1u)
+                    : 0;
+            l3_used = (cpu().getDataCacheLevels() >= 3)
+                    ? cpu().getDataCacheSize(2)
+                            / (std::max)(cpu().getCoresSharingDataCache(2), 1u)
+                    : 0;
+            break;
+        default: // min
             l1_used = (std::min)(calculate_per_core_cache(pcore_cpu, 1),
                     calculate_per_core_cache(lp_core_cpu, 1));
             l2_used = (std::min)(calculate_per_core_cache(pcore_cpu, 2),
@@ -361,6 +374,13 @@ static unsigned get_per_core_cache_size_for_policy(
     return get_per_core_cache_size_cpuid(level);
 #else
     if (sizing_policy == cache_sizing_policy_t::legacy) {
+        if (!is_hybrid()) {
+            print_cache_debuginfo_once();
+        } else if (get_verbose(verbose_t::debuginfo) >= 1) {
+            const auto &cs = get_hybrid_core_cache_sizes();
+            print_hybrid_cache_debuginfo_once(cs.pcore_cpu, cs.lp_core_cpu,
+                    cs.lpe_core_cpu, sizing_policy);
+        }
         return get_per_core_cache_size_cpuid(level);
     }
 
