@@ -73,6 +73,19 @@ struct dnnl_stream : public dnnl::impl::c_compatible {
 
     bool is_profiling_enabled() const { return impl_->is_profiling_enabled(); }
 
+    bool is_verbose_profiler_enabled() const {
+        return impl_->use_verbose_profiler();
+    }
+
+    virtual dnnl::impl::status_t run_verbose_profiler(
+            const std::string &pd_info, double start_ms) {
+        if (!is_verbose_profiler_enabled())
+            VWARN(primitive, exec,
+                    "attempting to run verbose profiler when it is not "
+                    "enabled");
+        return dnnl::impl::status::unimplemented;
+    }
+
     virtual dnnl::impl::status_t zero_pad(const dnnl::impl::memory_t *memory,
             const dnnl::impl::exec_ctx_t &ctx);
 
