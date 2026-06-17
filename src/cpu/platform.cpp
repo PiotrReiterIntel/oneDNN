@@ -282,51 +282,6 @@ unsigned get_per_core_cache_size(int level) {
 #endif
 }
 
-unsigned get_per_core_cache_size_pcore(int level) {
-#if DNNL_X64
-    return x64::platform::get_per_core_cache_size_topology(
-            level, x64::platform::cache_sizing_policy_t::p_core);
-#else
-    return get_per_core_cache_size(level);
-#endif
-}
-
-unsigned get_per_core_cache_size_lp_core(int level) {
-#if DNNL_X64
-    return x64::platform::get_per_core_cache_size_topology(
-            level, x64::platform::cache_sizing_policy_t::lp_core);
-#else
-    return get_per_core_cache_size(level);
-#endif
-}
-
-unsigned get_per_core_cache_size_lpe_core(int level) {
-#if DNNL_X64
-    return x64::platform::get_per_core_cache_size_topology(
-            level, x64::platform::cache_sizing_policy_t::lpe_core);
-#else
-    // LPE cores are an Intel x64-only concept; return 0 to signal absence.
-    // Callers should guard with has_lpe_core_cpu() before using this value.
-    return 0;
-#endif
-}
-
-bool is_hybrid_cpu() {
-#if DNNL_X64
-    return x64::platform::is_hybrid();
-#else
-    return false;
-#endif
-}
-
-bool has_lpe_core_cpu() {
-#if DNNL_X64
-    return x64::platform::has_lpe_core();
-#else
-    return false;
-#endif
-}
-
 unsigned get_num_cores() {
 #if DNNL_X64
     return x64::cpu().getNumCores(Xbyak::util::CoreLevel);

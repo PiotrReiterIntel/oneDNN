@@ -176,20 +176,6 @@ bool DNNL_API has_training_support(data_type_t data_type);
 float DNNL_API s8s8_weights_scale_factor();
 
 unsigned DNNL_API get_per_core_cache_size(int level);
-// Returns the per-core L1/L2/L3 cache size for performance (P) cores.
-// On non-hybrid systems, equivalent to get_per_core_cache_size().
-unsigned get_per_core_cache_size_pcore(int level);
-// Returns the per-core L1/L2/L3 cache size for LP E-cores (Efficient cores
-// that share an L3). On non-hybrid systems, equivalent to get_per_core_cache_size().
-unsigned get_per_core_cache_size_lp_core(int level);
-// Returns the per-core L1/L2 cache size for LPE-cores (Efficient cores with no L3,
-// e.g. Meteor Lake SoC tile). Returns 0 for any level on systems without LPE-cores,
-// including non-x64 platforms. Callers should guard with has_lpe_core_cpu().
-unsigned get_per_core_cache_size_lpe_core(int level);
-// Returns true if the CPU has a hybrid architecture (P-cores + E-cores).
-bool is_hybrid_cpu();
-// Returns true if the hybrid CPU has a low-power E-core island (no L3).
-bool has_lpe_core_cpu();
 uint32_t get_num_ways_in_cache(int level);
 uint32_t get_num_sets_in_cache(int level);
 unsigned DNNL_API get_num_cores();

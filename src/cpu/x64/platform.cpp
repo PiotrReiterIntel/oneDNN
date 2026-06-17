@@ -15,7 +15,10 @@
 *******************************************************************************/
 
 #include <algorithm>
+#include <atomic>
+#include <cstdio>
 #include "common/utils.hpp"
+#include "common/verbose.hpp"
 #include "cpu/x64/cpu_isa_traits.hpp"
 #include "cpu/x64/platform.hpp"
 #include "xbyak/xbyak_util.h"
@@ -32,14 +35,14 @@ namespace {
 // Global CPU topology instance, initialized on first use
 // This is thread-safe due to C++11 magic statics
 // NOTE: xbyak::util::CpuTopology is not supported on macOS.
-struct cpu_topology_cach_t {
+struct cpu_topology_cache_t {
     Xbyak::util::CpuTopology topology;
-    cpu_topology_cach_t() : topology(cpu()) {}
+    cpu_topology_cache_t() : topology(cpu()) {}
 };
 
 // Thread-safe lazy initialization using C++11 magic statics
-cpu_topology_cach_t &get_topology_cache() {
-    static cpu_topology_cach_t cache;
+cpu_topology_cache_t &get_topology_cache() {
+    static cpu_topology_cache_t cache;
     return cache;
 }
 
@@ -118,6 +121,124 @@ uint32_t calculate_per_core_cache(size_t cpu_index, int level) {
     return cache.size / sharing_cores;
 }
 
+// Collect physical cache size, sharing count, and SMT width for one level.
+struct cache_level_info_t {
+    uint32_t total_kb;     // total physical cache capacity in KB
+    size_t sharing_cores;  // number of physical cores sharing this instance
+    size_t smt_width;      // logical threads per physical core (HT width)
+};
+
+cache_level_info_t get_cache_level_info(size_t cpu_index, int level) {
+    const auto &topo = get_topology_cache().topology;
+    Xbyak::util::CacheType ct = convert_cache_level(level);
+    if (ct == Xbyak::util::CACHE_UNKNOWN) return {0, 1, 1};
+    const auto &cache = topo.getCache(cpu_index, ct);
+    if (cache.size == 0) return {0, 1, 1};
+    size_t sharing_logical = cache.getSharedCpuNum();
+    if (sharing_logical == 0) sharing_logical = 1;
+    size_t smt = topo.getCache(cpu_index, Xbyak::util::L1d).getSharedCpuNum();
+    if (smt == 0) smt = 1;
+    size_t sharing_cores = std::max(sharing_logical / smt, size_t(1));
+    return {cache.size / 1024, sharing_cores, smt};
+}
+
+// Print hybrid per-core cache topology once per process at debuginfo=1 or higher.
+// One line per core type showing physical cache sizes.
+// Shared levels annotated: L{N}:{total}KB({N}cores,{per_core}KB/core)
+// Private levels:          L{N}:{total}KB
+// smt:{N} at end of each line: logical threads per physical core (HT width).
+// Final line: per-core sizes for the active sizing policy.
+void print_hybrid_cache_debuginfo_once(size_t pcore_cpu, size_t lp_core_cpu,
+        size_t lpe_core_cpu, cache_sizing_policy_t sizing_policy) {
+    if (get_verbose(verbose_t::debuginfo) < 1) return;
+    static std::atomic_flag printed = ATOMIC_FLAG_INIT;
+    if (printed.test_and_set()) return;
+
+    auto print_core_line = [](const char *tag, size_t cpu_idx,
+                                    bool include_l3) {
+        auto l1 = get_cache_level_info(cpu_idx, 1);
+        auto l2 = get_cache_level_info(cpu_idx, 2);
+        char buf[256];
+        int n = 0;
+        n += snprintf(buf + n, (int)sizeof(buf) - n,
+                "cpu,debuginfo,platform,%s,L1d:%uKB", tag, l1.total_kb);
+        if (l2.sharing_cores > 1)
+            n += snprintf(buf + n, (int)sizeof(buf) - n,
+                    ",L2:%uKB(%zucores,%uKB/core)",
+                    l2.total_kb, l2.sharing_cores,
+                    l2.total_kb / (uint32_t)l2.sharing_cores);
+        else
+            n += snprintf(buf + n, (int)sizeof(buf) - n,
+                    ",L2:%uKB", l2.total_kb);
+        if (include_l3) {
+            auto l3 = get_cache_level_info(cpu_idx, 3);
+            if (l3.total_kb > 0) {
+                if (l3.sharing_cores > 1)
+                    n += snprintf(buf + n, (int)sizeof(buf) - n,
+                            ",L3:%uMB(%zucores,%uKB/core)",
+                            l3.total_kb / 1024, l3.sharing_cores,
+                            l3.total_kb / (uint32_t)l3.sharing_cores);
+                else
+                    n += snprintf(buf + n, (int)sizeof(buf) - n,
+                            ",L3:%uMB", l3.total_kb / 1024);
+            }
+        }
+        snprintf(buf + n, (int)sizeof(buf) - n, ",smt:%zu\n", l1.smt_width);
+        verbose_printf(verbose_t::debuginfo, "%s", buf);
+    };
+
+    print_core_line("pcore_cache", pcore_cpu, true);
+    print_core_line("lp_core_cache", lp_core_cpu, true);
+    if (lpe_core_cpu != SIZE_MAX)
+        print_core_line("lpe_core_cache", lpe_core_cpu, false);
+
+    // Summary line: per-core sizes for the active sizing policy.
+    const char *policy_tag = "per_core_cache(min)";
+    uint32_t l1_used, l2_used, l3_used;
+    switch (sizing_policy) {
+        case cache_sizing_policy_t::p_core:
+            policy_tag = "per_core_cache(p_core)";
+            l1_used = calculate_per_core_cache(pcore_cpu, 1);
+            l2_used = calculate_per_core_cache(pcore_cpu, 2);
+            l3_used = calculate_per_core_cache(pcore_cpu, 3);
+            break;
+        case cache_sizing_policy_t::lp_core:
+            policy_tag = "per_core_cache(lp_core)";
+            l1_used = calculate_per_core_cache(lp_core_cpu, 1);
+            l2_used = calculate_per_core_cache(lp_core_cpu, 2);
+            l3_used = calculate_per_core_cache(lp_core_cpu, 3);
+            break;
+        case cache_sizing_policy_t::lpe_core:
+            policy_tag = "per_core_cache(lpe_core)";
+            l1_used = (lpe_core_cpu != SIZE_MAX)
+                    ? calculate_per_core_cache(lpe_core_cpu, 1)
+                    : 0;
+            l2_used = (lpe_core_cpu != SIZE_MAX)
+                    ? calculate_per_core_cache(lpe_core_cpu, 2)
+                    : 0;
+            l3_used = 0; // lpe_core has no L3
+            break;
+        default: // min (and legacy fallback)
+            l1_used = (std::min)(calculate_per_core_cache(pcore_cpu, 1),
+                    calculate_per_core_cache(lp_core_cpu, 1));
+            l2_used = (std::min)(calculate_per_core_cache(pcore_cpu, 2),
+                    calculate_per_core_cache(lp_core_cpu, 2));
+            l3_used = (std::min)(calculate_per_core_cache(pcore_cpu, 3),
+                    calculate_per_core_cache(lp_core_cpu, 3));
+            if (lpe_core_cpu != SIZE_MAX) {
+                l1_used = (std::min)(
+                        l1_used, calculate_per_core_cache(lpe_core_cpu, 1));
+                l2_used = (std::min)(
+                        l2_used, calculate_per_core_cache(lpe_core_cpu, 2));
+                // lpe_core has no L3 -- excluded to avoid zeroing L3 budget
+            }
+            break;
+    }
+    verbose_printf(verbose_t::debuginfo,
+            "cpu,debuginfo,platform,%s,L1d:%uKB,L2:%uKB,L3:%uKB\n",
+            policy_tag, l1_used / 1024, l2_used / 1024, l3_used / 1024);
+}
+
 #endif // !__APPLE__
 
 } // anonymous namespace
@@ -144,10 +265,54 @@ unsigned get_per_core_cache_size_cpuid(int level) {
     return 0;
 }
 
+// Print per-core cache sizes once (CPUID path, no CpuTopology init).
+// Format mirrors the hybrid path: shared levels show total, sharing count, and
+// per-core budget; private levels show just the total. smt field appended.
+static void print_cache_debuginfo_once() {
+    if (get_verbose(verbose_t::debuginfo) < 1) return;
+    static std::atomic_flag printed = ATOMIC_FLAG_INIT;
+    if (printed.test_and_set()) return;
+
+    // SMT width = L1d sharing count (L1d is private to one physical core).
+    uint32_t smt = cpu().getCoresSharingDataCache(0);
+    if (smt == 0) smt = 1;
+
+    char buf[256];
+    int n = 0;
+    unsigned nlevels = cpu().getDataCacheLevels();
+    n += snprintf(buf + n, (int)sizeof(buf) - n,
+            "cpu,debuginfo,platform,cache");
+    for (unsigned li = 0; li < nlevels && li < 3; li++) {
+        uint32_t total_kb = cpu().getDataCacheSize(li) / 1024;
+        uint32_t sharing = cpu().getCoresSharingDataCache(li);
+        if (sharing == 0) sharing = 1;
+        uint32_t per_core_kb = total_kb / sharing;
+        const char *label = (li == 0) ? "L1d" : (li == 1) ? "L2" : "L3";
+        if (li == 2) {
+            // L3: show total in MB, per-core in KB
+            if (sharing > 1)
+                n += snprintf(buf + n, (int)sizeof(buf) - n,
+                        ",%s:%uMB(%ucores,%uKB/core)",
+                        label, total_kb / 1024, sharing, per_core_kb);
+            else
+                n += snprintf(buf + n, (int)sizeof(buf) - n,
+                        ",%s:%uMB", label, total_kb / 1024);
+        } else {
+            if (sharing > 1)
+                n += snprintf(buf + n, (int)sizeof(buf) - n,
+                        ",%s:%uKB(%ucores,%uKB/core)",
+                        label, total_kb, sharing, per_core_kb);
+            else
+                n += snprintf(buf + n, (int)sizeof(buf) - n,
+                        ",%s:%uKB", label, total_kb);
+        }
+    }
+    snprintf(buf + n, (int)sizeof(buf) - n, ",smt:%u\n", smt);
+    verbose_printf(verbose_t::debuginfo, "%s", buf);
+}
+
 // Inner implementation: resolves sizing_policy to a cache size with no env-var override.
-// Called by both get_per_core_cache_size (which may apply the override first)
-// and by topology-info helpers (get_per_core_cache_size_pcore etc.) that must
-// always return true topology values regardless of the active env-var override.
+// Called by get_per_core_cache_size after the env-var override has been applied.
 static unsigned get_per_core_cache_size_for_policy(
         int level, cache_sizing_policy_t sizing_policy) {
     // Validate level
@@ -162,7 +327,10 @@ static unsigned get_per_core_cache_size_for_policy(
 
     // Fast path: on non-hybrid systems CpuTopology and legacy CPUID return the
     // same value.  Avoid the expensive CpuTopology init on non-hybrid systems.
-    if (!is_hybrid()) { return get_per_core_cache_size_cpuid(level); }
+    if (!is_hybrid()) {
+        print_cache_debuginfo_once();
+        return get_per_core_cache_size_cpuid(level);
+    }
 
     size_t pcore_cpu = find_representative_cpu(Xbyak::util::Performance);
     size_t lp_core_cpu = find_representative_cpu(
@@ -170,14 +338,20 @@ static unsigned get_per_core_cache_size_for_policy(
     size_t lpe_core_cpu = find_representative_cpu(
             Xbyak::util::Efficient, l3_filter_t::without_l3);
 
+    // if a core type is not found, fallback to CPU 0 which should have all caches present
     if (pcore_cpu == SIZE_MAX) pcore_cpu = 0;
-    if (lp_core_cpu == SIZE_MAX) lp_core_cpu = 0;
+    // fallback to p-core if no E-core with L3 found
+    if (lp_core_cpu == SIZE_MAX) lp_core_cpu = pcore_cpu;
+    // all uses of lpe_core_cpu should check for SIZE_MAX before using it
 
     uint32_t pcore_size = calculate_per_core_cache(pcore_cpu, level);
     uint32_t lp_core_size = calculate_per_core_cache(lp_core_cpu, level);
     uint32_t lpe_core_size = (lpe_core_cpu != SIZE_MAX)
             ? calculate_per_core_cache(lpe_core_cpu, level)
             : 0;
+
+    print_hybrid_cache_debuginfo_once(
+            pcore_cpu, lp_core_cpu, lpe_core_cpu, sizing_policy);
 
     switch (sizing_policy) {
         case cache_sizing_policy_t::p_core: return pcore_size;
@@ -210,11 +384,6 @@ unsigned get_per_core_cache_size(
     }();
     if (policy_override.first) sizing_policy = policy_override.second;
 
-    return get_per_core_cache_size_for_policy(level, sizing_policy);
-}
-
-unsigned get_per_core_cache_size_topology(
-        int level, cache_sizing_policy_t sizing_policy) {
     return get_per_core_cache_size_for_policy(level, sizing_policy);
 }
 
