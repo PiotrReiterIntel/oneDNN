@@ -217,14 +217,22 @@
                 select:s8.per_tensor+add:f32
 --batch=shapes_2d
 
-# Post-ops with binary select op, broadcast condition (ternary src2).
-# The condition broadcast is not fused; these must fall back cleanly (no crash).
+# Post-ops with binary select op, broadcast condition (ternary src2). Supported
+# condition broadcasts (per_hw, per_mb_spatial) fuse; others fall back to the
+# reference implementation. Both paths must be correct.
+# Fused: per_hw condition [1,1,h,w] (mask 12), including a tail N.
+--reset
+--dt=f32,bf16
+--stag=abcd --wtag=abcd --dtag=abcd
+--attr-post-ops=select:f32:12
+2x16x32x256:2x16x256x33n"sdpa_cond_per_hw"
+2x16x33x257:2x16x257x37n"sdpa_cond_per_hw_tail"
+# Fallback: scalar condition [1,1,1,1] is not fused; must fall back cleanly.
 --reset
 --dt=f32,bf16
 --stag=abcd --wtag=abcd --dtag=abcd
 --attr-post-ops=select:f32:common
-1x16x32x256:1x16x256x33n"sdpa_cond_bcast"
-1x16x33x257:1x16x257x37n"sdpa_cond_bcast_tail"
+1x16x32x256:1x16x256x33n"sdpa_cond_bcast_scalar"
 
 # Rounding Mode
 --reset

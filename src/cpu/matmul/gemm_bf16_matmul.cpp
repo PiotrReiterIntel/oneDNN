@@ -134,16 +134,18 @@ status_t gemm_bf16_matmul_t<dst_type>::pd_t::check_and_configure_attributes(
                                 post_ops.entry_, dst_md()),
                         broadcasting_strategy_t::per_oc);
         const bool has_prelu = post_ops.find(prelu) != -1;
-        // A select post-op with a broadcast condition (ternary src2) is not
-        // implemented: post-op application loads the condition at full dst
-        // shape and would read out of bounds. Reject it so a reference
-        // implementation, which handles condition broadcast, is used instead.
-        const bool has_ternary_bcast
+        // Reject a select post-op with a broadcast condition (ternary src2)
+        // unless its strategy is one this path can fuse; otherwise fall back to
+        // the reference implementation, which handles condition broadcast.
+        const bool ternary_bcast_unsupported
                 = binary_injector_utils::any_binary_postop_with_ternary_bcast(
-                        post_ops, dst_md());
+                          post_ops, dst_md())
+                && !binary_injector_utils::
+                           all_binary_postop_ternary_bcast_supported(
+                                   post_ops, dst_md(), enabled_bcast_strategy);
         return cpu::inner_product_utils::post_ops_ok(
                        post_ops, dst_md(), enabled_bcast_strategy)
-                && !has_ternary_bcast
+                && !ternary_bcast_unsupported
                 && IMPLICATION(is_binary_po_per_oc,
                         gemm_based::check_gemm_binary_per_oc_compatible_formats(
                                 *this))

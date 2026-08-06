@@ -57,11 +57,22 @@ memory_desc_t get_src2_desc(
 
 // Returns true if any select (binary-with-ternary) post-op has a condition
 // (ternary src2) that is broadcast against dst, i.e. its dims differ from dst.
-// Post-op application loads the condition at full dst shape; a broadcast
-// condition is not implemented and would read out of bounds, so callers must
-// reject such post-ops (falling back to a reference implementation).
 bool any_binary_postop_with_ternary_bcast(
         const post_ops_t &post_ops, const memory_desc_wrapper &dst_d);
+
+// Broadcast strategies for which a select condition (ternary src2) can be fused
+// as a matmul post-op. Single source of truth for the dispatch gate and the
+// injector's address-strategy selection.
+bool is_ternary_bcast_strategy_supported(broadcasting_strategy_t bcast);
+
+// Returns true if every select (binary-with-ternary) post-op has a full-shape
+// condition (ternary src2) or a broadcast condition whose strategy, resolved
+// against supported_strategy_set, is supported for fusion. Pass the supported
+// set the caller's binary injector uses so an unsupported strategy is rejected
+// here rather than reaching the injector.
+bool all_binary_postop_ternary_bcast_supported(const post_ops_t &post_ops,
+        const memory_desc_wrapper &dst_d,
+        const bcast_set_t &supported_strategy_set);
 
 /*
  * Returns a tuple of bools, which size is equal to number of bcast

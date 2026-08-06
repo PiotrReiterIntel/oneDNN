@@ -42,6 +42,8 @@ namespace x64 {
 namespace binary_injector {
 using dnnl::impl::cpu::binary_injector_utils::get_src1_desc;
 using dnnl::impl::cpu::binary_injector_utils::get_src2_desc;
+using dnnl::impl::cpu::binary_injector_utils::
+        is_ternary_bcast_strategy_supported;
 using dnnl::impl::cpu::binary_injector_utils::prepare_binary_args;
 
 bcast_set_t get_all_strategies_supported_by_injector();

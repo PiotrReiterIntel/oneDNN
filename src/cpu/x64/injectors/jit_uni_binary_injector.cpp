@@ -528,6 +528,21 @@ void jit_uni_binary_injector_t<isa, Vmm>::compute_vector_range(
             src1_desc, rhs_arg_static_params_.dst_d, supported_strategy_set_);
     const auto rhs_arg_data_type = src1_desc.data_type;
     const auto needs_ternary_input = post_op.is_binary_with_ternary_op();
+
+    // Broadcasting strategy for the ternary condition input (src2). Supported
+    // broadcast strategies get their own address math; anything else uses
+    // no_broadcast (a full memory operand read at the resolved element).
+    const auto resolve_ternary_strategy = [&]() {
+        const auto s = get_rhs_arg_broadcasting_strategy(
+                get_src2_desc(post_op, dst_d), dst_d, supported_strategy_set_);
+        return is_ternary_bcast_strategy_supported(s)
+                ? s
+                : broadcasting_strategy_t::no_broadcast;
+    };
+    const auto ternary_broadcasting_strategy = needs_ternary_input
+            ? resolve_ternary_strategy()
+            : broadcasting_strategy_t::no_broadcast;
+
     const auto &vmm_tail_idx = rhs_arg_params.vmm_tail_idx_;
     const bool tail_exists_in_range = !vmm_tail_idx.empty();
     const bool bcast_f32_non_avx512 = !is_avx512_
@@ -561,14 +576,20 @@ void jit_uni_binary_injector_t<isa, Vmm>::compute_vector_range(
     const bool shoud_preserve_oc_d_offset_conversion_regs
             = use_offset_conversions
             && rhs_broadcasting_strategy == broadcasting_strategy_t::per_oc_d;
+    // These strategies use the mb/spatial conversion registers; the guard covers
+    // both the src1 and the ternary condition (src2) address math.
+    const auto strategy_needs_mb_sp_regs = [](broadcasting_strategy_t s) {
+        return utils::one_of(s, broadcasting_strategy_t::per_mb_spatial,
+                broadcasting_strategy_t::per_mb_w,
+                broadcasting_strategy_t::per_mb,
+                broadcasting_strategy_t::per_hw,
+                broadcasting_strategy_t::batch);
+    };
     const bool should_preserve_mb_sp_offset_conversion_regs
             = use_offset_conversions
-            && utils::one_of(rhs_broadcasting_strategy,
-                    broadcasting_strategy_t::per_mb_spatial,
-                    broadcasting_strategy_t::per_mb_w,
-                    broadcasting_strategy_t::per_mb,
-                    broadcasting_strategy_t::per_hw,
-                    broadcasting_strategy_t::batch);
+            && (strategy_needs_mb_sp_regs(rhs_broadcasting_strategy)
+                    || strategy_needs_mb_sp_regs(
+                            ternary_broadcasting_strategy));
     const bool should_preserve_w_offset_conversion_regs = use_offset_conversions
             && rhs_broadcasting_strategy == broadcasting_strategy_t::per_w;
     const bool should_preserve_spatial_offset_conversion_regs
@@ -661,8 +682,8 @@ void jit_uni_binary_injector_t<isa, Vmm>::compute_vector_range(
             const auto rhs2_arg_data_type
                     = get_src2_desc(post_op, dst_d).data_type;
             rhs2_arg_addr = prepare_rhs_arg_addr(vmm_idx, rhs_arg_idx + 1,
-                    post_op, rhs_arg_params,
-                    broadcasting_strategy_t::no_broadcast, true, true);
+                    post_op, rhs_arg_params, ternary_broadcasting_strategy,
+                    true, true);
 
             const bool ternary_with_tail = rhs_arg_static_params_.is_tail
                     && vmm_tail_idx.find(vmm_idx) != vmm_tail_idx.cend();
@@ -753,12 +774,6 @@ Xbyak::Address jit_uni_binary_injector_t<isa, Vmm>::prepare_rhs_arg_addr(
             // can slow down the operation. For faster computation,
             // additional cache registers can be introduced to handle
             // the ternary operations.
-            // TODO: Currently, there is no broadcasting support for the
-            // ternary tensor, hence the address calculation can be carried out
-            // within the injector. As the support is extended to include
-            // broadcasting strategies like per_oc, it will be beneficial to
-            // move the calculation outside to allow iteration over multiple
-            // kernels.
             append_no_broadcast_offset(rhs_arg_params.vmm_idx_to_out_addr,
                     rhs_arg_params.vmm_idx_to_out_reg,
                     rhs_arg_params.vmm_idx_to_out_elem_off_val, vmm_idx,

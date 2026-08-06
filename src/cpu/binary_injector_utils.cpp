@@ -15,6 +15,7 @@
 *******************************************************************************/
 #include <algorithm>
 
+#include "common/broadcast_strategy.hpp"
 #include "common/primitive.hpp"
 #include "common/primitive_attr.hpp"
 #include "cpu/binary_injector_utils.hpp"
@@ -105,6 +106,31 @@ bool any_binary_postop_with_ternary_bcast(
         for (int d = 0; d < dst_d.ndims(); ++d)
             if (src2_d.dims()[d] != dst_d.dims()[d]) return true;
         return false;
+    });
+}
+
+bool is_ternary_bcast_strategy_supported(broadcasting_strategy_t bcast) {
+    // Confirmed on hardware; widen as coverage grows. Restricted to strategies
+    // whose injector address math uses a full (non-broadcast) memory operand and
+    // whose conversion registers the injector's preservation guard covers for the
+    // ternary pass.
+    return utils::one_of(bcast, broadcasting_strategy_t::per_hw,
+            broadcasting_strategy_t::per_mb_spatial);
+}
+
+bool all_binary_postop_ternary_bcast_supported(const post_ops_t &post_ops,
+        const memory_desc_wrapper &dst_d,
+        const bcast_set_t &supported_strategy_set) {
+    return std::all_of(post_ops.entry_.cbegin(), post_ops.entry_.cend(),
+            [&](const post_ops_t::entry_t &entry) -> bool {
+        if (!entry.is_binary_with_ternary_op()) return true;
+        // user_src2_desc carries the real condition dims; the resolved
+        // src2_desc is not yet populated at init time. A strategy outside the
+        // caller's supported set resolves to unsupported and is rejected here.
+        const auto bcast_type = get_rhs_arg_broadcasting_strategy(
+                entry.binary.user_src2_desc, dst_d, supported_strategy_set);
+        return bcast_type == broadcasting_strategy_t::no_broadcast
+                || is_ternary_bcast_strategy_supported(bcast_type);
     });
 }
 
