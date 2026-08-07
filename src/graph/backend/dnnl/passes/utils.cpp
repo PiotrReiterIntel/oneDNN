@@ -385,6 +385,37 @@ bool post_binary_fusible(
     auto fused_out = base_op->get_output_values()[0];
     auto consumers = fused_out->get_consumers();
     if (consumers.size() != 1) return false;
+
+    // A select post-op is ternary: src0, src1 and the condition (src2) - see
+    // select_handler in lower.cpp, which reorders the graph Select(cond, then,
+    // else) to the binary layout [then(src0), else(src1), cond(src2)]. Every
+    // other binary post-op has exactly two inputs. Only matmul fuses select as
+    // a post-op; other base ops (e.g. reduction) can't route the extra ternary
+    // input through their post-op insertion path, so leave them rejected.
+    // Fusing the ternary select is only enabled on CPU: the broadcast
+    // condition it relies on is optimized in the x64 matmul kernels, and the
+    // GPU path is unvalidated for it.
+    const bool is_select = ekind == dnnl_cpu
+            && base_op->get_kind() == op_kind::_matmul
+            && static_cast<dnnl::algorithm>(
+                       bin_op->get_attr<int64_t>(op_attr::alg_kind))
+                    == dnnl::algorithm::binary_select;
+    if (is_select) {
+        if (bin_op->num_inputs() != 3) return false;
+        // Fuse only when the base op produces the first input (src0); the
+        // condition and else inputs must be broadcast-compatible with the
+        // fused output shape.
+        if (consumers[0].get_offset() != 0) return false;
+        const auto fused_shape
+                = ltw(bin_op->get_input_logical_tensor(0)).vdims();
+        const auto else_shape
+                = ltw(bin_op->get_input_logical_tensor(1)).vdims();
+        const auto cond_shape
+                = ltw(bin_op->get_input_logical_tensor(2)).vdims();
+        return post_binary_fusible_impl(base_op, fused_shape, else_shape, ekind)
+                && post_binary_fusible_impl(
+                        base_op, fused_shape, cond_shape, ekind);
+    }
     if (consumers[0].get_op().num_inputs() != 2) return false;
 
     size_t fused_in_off = consumers[0].get_offset();
