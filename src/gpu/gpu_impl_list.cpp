@@ -15,6 +15,7 @@
 *******************************************************************************/
 
 #include "gpu/gpu_impl_list.hpp"
+#include "gpu/gpu_plugin_registry.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -27,7 +28,9 @@ const impl_list_item_t *gpu_impl_list_t::get_implementation_list(
     // clang-format off
 #define CASE(kind) \
     case primitive_kind::kind: \
-        return get_##kind##_impl_list((const kind##_desc_t *)desc);
+        return gpu_plugin_registry_t::instance().get_list( \
+                primitive_kind::kind, \
+                get_##kind##_impl_list((const kind##_desc_t *)desc));
         switch ((int)desc->primitive_kind) {
             CASE(batch_normalization);
             CASE(binary);
