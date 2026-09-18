@@ -45,22 +45,11 @@ format-negotiation/attr access any built-in implementation gets.
 - `common.cmake` -- shared CMake setup (`ONEDNN_SOURCE_DIR`/
   `ONEDNN_BUILD_DIR` validation, standard/PIC/`-fsycl` flags, `NDEBUG`/
   `Release` build-type defaulting, and a `plugin_common_setup(<target>)`
-  function for include dirs, the dnnl link, the static-archive link
-  described below, and visibility settings) that every plugin's own
-  `CMakeLists.txt` `include()`s. Keeps that boilerplate from drifting across
-  plugins as more get added -- see either existing `CMakeLists.txt` for the
-  include-then-call pattern.
-- `make_archives.sh` -- shared script that archives an oneDNN build
-  directory's already-built object code into a `.a` every plugin statically
-  links against via `plugin_common_setup()`. This is a universal
-  requirement, not an opt-in: even `matmul_template`'s fully generic,
-  unmodified pd code transitively references internal symbols
-  (`dnnl::impl::rnn_create_time_scales_t::set_single_scale`, via the shared
-  `attr_scales_ok()` pd helper) with no entry in `libdnnl.so`'s dynamic
-  symbol table (oneDNN's `-fvisibility=internal` build) -- confirmed by
-  hitting the exact same `dlopen`-time "undefined symbol" failure on that
-  plugin with zero kernel-specific code written yet. Must be rerun whenever
-  `ONEDNN_BUILD_DIR` itself is rebuilt, not every plugin rebuild.
+  function for include dirs, the dnnl dynamic link against `libdnnl.so`,
+  and visibility settings) that every plugin's own `CMakeLists.txt`
+  `include()`s. Keeps that boilerplate from drifting across plugins as more
+  get added -- see either existing `CMakeLists.txt` for the include-then-call
+  pattern.
 - `kf_matmul_plugin/` -- a complete, working matmul plugin. It dispatches
   straight to a real evolvable SYCL kernel body
   (`kf_kernel.sycl.hpp`, digested from an external kernel-generation
@@ -122,7 +111,7 @@ Only do this when actually asked to add a plugin, not speculatively.
    (`project()`, `include(../common.cmake)`, `add_library(...)`,
    `plugin_common_setup(<target>)`) -- do not re-duplicate the
    `ONEDNN_SOURCE_DIR`/`ONEDNN_BUILD_DIR` checks, include dirs, dnnl link,
-   static-archive link, or `NDEBUG`/`Release` build-type setting that
+   or `NDEBUG`/`Release` build-type setting that
    `common.cmake`/`plugin_common_setup()` already provide to every plugin
    uniformly -- this is not `kf_matmul_plugin`-specific extra setup to opt
    into, every plugin needs it (see `common.cmake`'s comments for why).
