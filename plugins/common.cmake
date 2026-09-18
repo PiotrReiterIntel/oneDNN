@@ -38,6 +38,17 @@ if(NOT ONEDNN_BUILD_DIR)
         "dnnl_config.h/dnnl_version.h) and its built dnnl library.")
 endif()
 
+set(ONEDNN_PLUGIN_LINK_MODE "ARCHIVE" CACHE STRING
+    "Plugin internal-symbol link mode: ARCHIVE or HOST")
+set_property(CACHE ONEDNN_PLUGIN_LINK_MODE PROPERTY STRINGS ARCHIVE HOST)
+string(TOUPPER "${ONEDNN_PLUGIN_LINK_MODE}" ONEDNN_PLUGIN_LINK_MODE)
+if(NOT ONEDNN_PLUGIN_LINK_MODE STREQUAL "ARCHIVE"
+        AND NOT ONEDNN_PLUGIN_LINK_MODE STREQUAL "HOST")
+    message(FATAL_ERROR
+        "ONEDNN_PLUGIN_LINK_MODE must be ARCHIVE or HOST, got "
+        "'${ONEDNN_PLUGIN_LINK_MODE}'.")
+endif()
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -64,8 +75,8 @@ endif()
 add_compile_definitions(NDEBUG)
 
 # Call once, after add_library(<target> ...), to apply the include paths,
-# dnnl link, static archive link, and visibility settings every plugin
-# needs identically.
+# dnnl link, optional static archive link, and visibility settings every
+# plugin needs identically.
 function(plugin_common_setup target)
     target_include_directories(${target} PRIVATE
         ${ONEDNN_SOURCE_DIR}/src
@@ -85,6 +96,7 @@ function(plugin_common_setup target)
     endif()
     target_link_libraries(${target} PRIVATE ${ONEDNN_LIB})
 
+    if(ONEDNN_PLUGIN_LINK_MODE STREQUAL "ARCHIVE")
     # oneDNN's own build compiles everything with -fvisibility=internal
     # (cmake/platform.cmake), so internal C++ symbols a plugin needs (e.g.
     # memory_storage_t, or even plain pd_t helpers like attr_scales_ok())
@@ -115,6 +127,14 @@ function(plugin_common_setup target)
     target_link_libraries(${target} PRIVATE
         -Wl,--start-group ${PLUGIN_ONEDNN_ARCHIVE_DIR}/libdnnl_full.a -Wl,--end-group
     )
+    else()
+        # HOST mode requires a matching -DDNNL_NATIVE_PLUGIN_HOST=ON build.
+        # No oneDNN object archive is linked into the plugin; unresolved
+        # native C++ symbols must resolve from the host libdnnl.so.
+        if(UNIX AND NOT APPLE)
+            target_link_options(${target} PRIVATE -Wl,--no-undefined)
+        endif()
+    endif()
 
     set_target_properties(${target} PROPERTIES
         CXX_VISIBILITY_PRESET hidden

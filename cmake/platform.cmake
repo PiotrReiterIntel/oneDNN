@@ -56,7 +56,14 @@ macro(platform_unix_and_mingw_common_ccxx_flags var)
     append(${var} "-Wall -Wno-unknown-pragmas")
     append(${var} "-Wundef")
     append_if(DNNL_WERROR ${var} "-Werror")
-    append(${var} "-fvisibility=internal")
+    if(DNNL_NATIVE_PLUGIN_HOST)
+        # Experimental lockstep native-plugin build. Plugins link against
+        # this shared library instead of embedding a second copy of oneDNN's
+        # internal objects. This is not a stable public ABI.
+        append(${var} "-fvisibility=default")
+    else()
+        append(${var} "-fvisibility=internal")
+    endif()
 endmacro()
 
 macro(platform_unix_and_mingw_common_cxx_flags var)

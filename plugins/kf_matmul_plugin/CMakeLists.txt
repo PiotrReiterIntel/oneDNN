@@ -43,10 +43,8 @@ project(kf_matmul_plugin LANGUAGES CXX)
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/../common.cmake)
 
-# NDEBUG matching and static-archive linking of internal oneDNN object code
-# (needed here for memory_storage_t etc.) are handled uniformly for every
-# plugin by common.cmake/plugin_common_setup() -- see there for why. Nothing
-# kf-specific needed on top of that.
+# NDEBUG matching and either legacy archive linking or native host-symbol
+# linking are handled uniformly by common.cmake/plugin_common_setup().
 add_library(kf_matmul_plugin SHARED
     kf_matmul.cpp
 )

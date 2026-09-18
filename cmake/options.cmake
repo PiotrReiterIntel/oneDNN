@@ -200,6 +200,9 @@ onednn_option(EXPERIMENTAL_SYCL_KERNEL_COMPILER OFF
     "Enables experimental SYCL OpenCL kernel compiler extension. This option
     works independently from DNNL_EXPERIMENTAL.")
 
+onednn_option(NATIVE_PLUGIN_HOST OFF
+    "Exports native oneDNN C++ symbols for lockstep GPU plugins.")
+
 onednn_option(EXPERIMENTAL_ENABLE_SYCL_PROFILING_TAG OFF
     "Enable use of the experimental sycl_ext_oneapi_profiling_tag extension 
     for verbose profiling. When disabled, verbose profiling requires a 

@@ -11,6 +11,39 @@ injected ahead of oneDNN's own built-in implementations for that primitive
 kind, so they get first refusal during dispatch.
 See `dnnl_gpu_plugin_register` -- the only symbol a plugin must export.
 
+## WIP: reducing plugin binary size
+
+The current standalone plugin link statically packages a broad set of
+oneDNN object files because internal oneDNN symbols are not dynamically
+exported. With the existing oneDNN build, each plugin is about 84 MB and
+contains substantial unrelated CPU and graph code.
+
+Exploration so far shows that linking with `-Wl,--gc-sections` reduces the
+plugin by about 5%, while stripping nonessential symbol metadata reduces it
+further. The intended direction for a production-quality solution is to
+make function/data sections an explicit oneDNN build mode
+(`-ffunction-sections -fdata-sections`), regenerate the static archive, and
+link release plugins with section garbage collection and appropriate
+stripping. This needs to remain compatible with ordinary oneDNN builds and
+should be picked up as a KF-team follow-up; no final build-system integration
+is committed yet.
+
+The current investigation also points toward maintaining two build trees:
+the normal full oneDNN build for general consumers, and a separate
+plugin-support build configured for the GPU-only plugin dependency closure:
+
+```bash
+cmake -S . -B build-plugin-support \
+      -DONEDNN_CPU_RUNTIME=NONE \
+      -DONEDNN_GPU_RUNTIME=SYCL \
+      -DONEDNN_GPU_VENDOR=INTEL \
+      -DONEDNN_BUILD_GRAPH=OFF \
+      -DCMAKE_CXX_FLAGS="-ffunction-sections -fdata-sections"
+```
+
+Plugins must be built and loaded with the matching plugin-support oneDNN
+build; do not mix them with the full build's `libdnnl.so`.
+
 
 ## Building
 
@@ -22,7 +55,7 @@ directory), with `ONEDNN_BUILD_DIR` pointing at an oneDNN build directory
 that has already been **built**, not just configured:
 
 ```bash
-ONEDNN_BUILD_DIR=/home/preiter/onednn-build-fork
+ONEDNN_BUILD_DIR=/path/to/onednn-build
 PLUGIN_DIR=plugins/kf_matmul_plugin   # or plugins/matmul_template, etc.
 
 source /opt/intel/oneapi/setvars.sh
@@ -36,21 +69,58 @@ cmake --build "$PLUGIN_DIR/build"
 This produces `$PLUGIN_DIR/build/lib<plugin-target>.so` (e.g.
 `libkf_matmul_plugin.so`).
 
-Every plugin here statically links internal oneDNN object code (see
-`kf_matmul_plugin`'s section below for why -- in short, `-fvisibility=internal`
-means plain dynamic linking against `libdnnl.so` isn't enough, even for
-fully generic pd code that never touches a raw kernel pointer). This needs
-one extra step **before** the `cmake --build` above: package the main
-oneDNN build's already-compiled object code into a static archive, via the
-shared `plugins/make_archives.sh`. It reuses `ONEDNN_BUILD_DIR`'s already-
-compiled `.o` files (a configure-only build directory won't work) and
-writes the archive under `ONEDNN_BUILD_DIR/archives`, so it only needs
-rerunning when that build directory itself has been rebuilt, not every time
-you rebuild a plugin:
+With the default `ONEDNN_PLUGIN_LINK_MODE=ARCHIVE`, every plugin statically
+links internal oneDNN object code (see `kf_matmul_plugin`'s section below for
+why -- in short, `-fvisibility=internal` means plain dynamic linking against
+`libdnnl.so` isn't enough, even for fully generic pd code that never touches a
+raw kernel pointer). This needs one extra step **before** the
+`cmake --build` above: package the main oneDNN build's already-compiled object
+code into a static archive, via the shared `plugins/make_archives.sh`. It
+reuses `ONEDNN_BUILD_DIR`'s already-compiled `.o` files (a configure-only
+build directory won't work) and writes the archive under
+`ONEDNN_BUILD_DIR/archives`, so it only needs rerunning when that build
+directory itself has been rebuilt, not every time you rebuild a plugin:
 
 ```bash
 bash plugins/make_archives.sh "$ONEDNN_BUILD_DIR"
 ```
+
+### Experimental native host-symbol mode
+
+The next-stage POC can avoid embedding oneDNN objects in every plugin. Build
+the shared oneDNN host with the experimental native-plugin option:
+
+```bash
+cmake -S . -B build-native-plugin-host \
+      -DDNNL_LIBRARY_TYPE=SHARED \
+      -DDNNL_NATIVE_PLUGIN_HOST=ON \
+      -DDNNL_GPU_RUNTIME=SYCL \
+      -DDNNL_GPU_VENDOR=INTEL
+cmake --build build-native-plugin-host --target dnnl
+```
+
+Then configure the plugin with host-symbol mode:
+
+```bash
+cmake -B plugins/kf_matmul_plugin/build-host \
+      -S plugins/kf_matmul_plugin \
+      -DONEDNN_SOURCE_DIR=$(pwd) \
+      -DONEDNN_BUILD_DIR=$(pwd)/build-native-plugin-host \
+      -DONEDNN_PLUGIN_LINK_MODE=HOST \
+      -DCMAKE_CXX_COMPILER=icpx
+cmake --build plugins/kf_matmul_plugin/build-host
+```
+
+`HOST` mode does not call `make_archives.sh` and does not link
+`libdnnl_full.a`. The plugin's native C++ references must resolve from the
+matching exported-symbol `libdnnl.so`. This is a lockstep development mode,
+not a stable ABI: use the same oneDNN source revision, compiler, SYCL runtime,
+architecture, and build options for the host and plugin.
+
+The first validation must compare the ordinary stripped host and this host
+with plugins disabled. Exporting symbols must not be combined with changed
+CPU/GPU primitive sets, graph settings, optimization flags, or other
+performance-affecting configuration changes.
 
 ## Sample: running both plugins together
 
