@@ -48,6 +48,8 @@ regular_impl_list_map() {
             {{f32, u4, 0}, &regular_u4_impl_list_map()},
             {{s4, data_type::undef, 0}, &regular_s4_impl_list_map()},
             {{u4, data_type::undef, 0}, &regular_u4_impl_list_map()},
+            {{f32, u2, 0}, &regular_u2_impl_list_map()},
+            {{u2, data_type::undef, 0}, &regular_u2_impl_list_map()},
     };
     return the_map;
 }
@@ -63,8 +65,10 @@ comp_s8s8_impl_list_map() {
     return the_map;
 }
 
-const impl_list_item_t *cpu_engine_impl_list_t::get_reorder_implementation_list(
-        const memory_desc_t *src_md, const memory_desc_t *dst_md) {
+const impl_list_item_t *get_reorder_impl_list(
+        const reorder_desc_t *reorder_desc) {
+    const memory_desc_t *src_md = &reorder_desc->src_desc;
+    const memory_desc_t *dst_md = &reorder_desc->dst_desc;
     reorder_impl_key_t dt_pair {src_md->data_type, dst_md->data_type, 0};
     const bool do_comp_s8s8 = dst_md->extra.flags
             & (memory_extra_flags::compensation_conv_s8s8

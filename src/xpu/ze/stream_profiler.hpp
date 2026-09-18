@@ -20,42 +20,48 @@
 #include "xpu/stream_profiler.hpp"
 #include "xpu/ze/context.hpp"
 
-#include <unordered_set>
+#include <cassert>
 
 namespace dnnl {
 namespace impl {
 namespace xpu {
 namespace ze {
 
+// Handles timestamp counter wraparound.
+inline uint64_t duration_cycles(
+        uint64_t start, uint64_t end, uint64_t max_val) {
+    return (end >= start) ? (end - start) : ((max_val - start) + end + 1);
+}
+
 class stream_profiler_t : public xpu::stream_profiler_t {
 public:
     class entry_t {
     public:
-        entry_t() = delete;
+        entry_t() = default;
 
-        entry_t(ze_kernel_timestamp_result_t &kernel_timestamp_result,
+        entry_t(const ze_kernel_timestamp_result_t &kernel_timestamp_result,
                 uint64_t max_timestamp_value, double timestamp_freq)
-            : context_(get_timestamp(
-                      kernel_timestamp_result.context, max_timestamp_value))
+            : start_(kernel_timestamp_result.context.kernelStart)
+            , end_(kernel_timestamp_result.context.kernelEnd)
+            , max_timestamp_value_(max_timestamp_value)
             , freq_(timestamp_freq) {}
 
-        uint64_t get_cycles() const { return context_; }
+        uint64_t start() const { return start_; }
+        uint64_t end() const { return end_; }
+
+        uint64_t get_cycles() const {
+            return duration_cycles(start_, end_, max_timestamp_value_);
+        }
 
         uint64_t get_nsec() const {
             return static_cast<uint64_t>(freq_ * get_cycles());
         }
 
     private:
-        uint64_t get_timestamp(
-                ze_kernel_timestamp_data_t &ts, uint64_t max_timestamp_value) {
-            return (ts.kernelEnd >= ts.kernelStart)
-                    ? (ts.kernelEnd - ts.kernelStart)
-                    : ((max_timestamp_value - ts.kernelStart) + ts.kernelEnd
-                              + 1);
-        }
-
-        uint64_t context_;
-        double freq_;
+        uint64_t start_ = 0;
+        uint64_t end_ = 0;
+        uint64_t max_timestamp_value_ = 0;
+        double freq_ = 0;
     };
 
     stream_profiler_t(const impl::stream_t *stream, double timestamp_freq,
@@ -66,65 +72,40 @@ public:
 
     status_t get_info(profiling_data_kind_t data_kind, int *num_entries,
             uint64_t *data) const override {
-        if (!num_entries) return status::invalid_arguments;
+        return get_info_generic(data_kind, num_entries, data);
+    }
 
-        bool is_per_kernel
-                = (data_kind == profiling_data_kind::time_per_kernel);
-        if (!data) {
-            if (is_per_kernel) {
-                *num_entries = (int)events_.size();
-                return status::success;
-            }
-            std::unordered_set<uint64_t> seen;
-            for (auto &ev : events_)
-                seen.insert(ev.stamp);
-            *num_entries = (int)seen.size();
-            return status::success;
-        }
+protected:
+    // L0 reports raw device cycles that wrap at max_timestamp_value_; convert
+    // to monotonic nsec so the generic path can use end - beg.
+    status_t query_event_time(const xpu::event_t &event, uint64_t &beg,
+            uint64_t &end) const override {
+        entry_t entry;
+        CHECK(query_entry(event, entry));
+        beg = static_cast<uint64_t>(timestamp_freq_ * entry.start());
+        end = beg + static_cast<uint64_t>(timestamp_freq_ * entry.get_cycles());
+        return status::success;
+    }
 
-        std::map<uint64_t, entry_t> stamp2entry;
-        int idx = 0;
-        for (auto &ev : events_) {
-            const ze::event_t &ze_event
-                    = *utils::downcast<ze::event_t *>(ev.event.get());
-
-            ze_kernel_timestamp_result_t kernel_timestamp_result;
-            ZE_CHECK(ze::zeEventQueryKernelTimestamp(
-                    ze_event[0], &kernel_timestamp_result));
-
-            entry_t entry(kernel_timestamp_result, max_timestamp_value_,
-                    timestamp_freq_);
-            if (is_per_kernel) {
-                data[idx++] = entry.get_nsec();
-                continue;
-            }
-            stamp2entry.emplace(ev.stamp, entry);
-        }
-        if (is_per_kernel) return status::success;
-
-        return get_info_impl(stamp2entry, data_kind, data);
+    // Generic cycles formula expects Hz; timestamp_freq_ is nsec per cycle.
+    status_t query_event_freq(
+            const xpu::event_t &, double &freq) const override {
+        freq = 1e9 / timestamp_freq_;
+        return status::success;
     }
 
 private:
     stream_profiler_t() = delete;
     DNNL_DISALLOW_COPY_AND_ASSIGN(stream_profiler_t);
 
-    status_t get_info_impl(const std::map<uint64_t, entry_t> &stamp2entry,
-            profiling_data_kind_t data_kind, uint64_t *data) const {
-        int idx = 0;
-        for (auto &kv : stamp2entry) {
-            auto &e = kv.second;
-            switch ((int)data_kind) {
-                case profiling_data_kind::time: data[idx] = e.get_nsec(); break;
-                case profiling_data_kind::cycles: {
-                    data[idx] = e.get_cycles();
-                    if (callback_) callback_(kv.first, e.get_nsec());
-                    break;
-                }
-                default: assert(!"unexpected data kind");
-            }
-            idx++;
-        }
+    status_t query_entry(const xpu::event_t &event, entry_t &entry) const {
+        const auto &ze_event = xpu::ze::event_t::from(event);
+        assert(ze_event.size() == 1);
+        ze_kernel_timestamp_result_t kernel_timestamp_result;
+        ZE_CHECK(ze::zeEventQueryKernelTimestamp(
+                ze_event[0], &kernel_timestamp_result));
+        entry = entry_t(
+                kernel_timestamp_result, max_timestamp_value_, timestamp_freq_);
         return status::success;
     }
 
@@ -155,9 +136,7 @@ private:
 
     uint64_t get_duration_cycles(
             uint64_t start_cycles, uint64_t end_cycles) const {
-        return (end_cycles >= start_cycles)
-                ? (end_cycles - start_cycles)
-                : ((max_timestamp_value_ - start_cycles) + end_cycles + 1);
+        return duration_cycles(start_cycles, end_cycles, max_timestamp_value_);
     }
 
     double timestamp_freq_;

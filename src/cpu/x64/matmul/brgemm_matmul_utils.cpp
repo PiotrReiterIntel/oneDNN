@@ -1735,7 +1735,7 @@ status_t compute_blocking_heuristic_amx(brgemm_matmul_conf_t &bgmmc,
 status_t compute_blocking_heuristic(brgemm_matmul_conf_t &bgmmc,
         const brgemm_matmul_conf_utils_t &bm_conf_utils,
         const memory_desc_wrapper &dst_d, const primitive_attr_t &attr) {
-    const dim_t actual_ldd = dst_d.ndims() == 2 && bgmmc.M == 1
+    const dim_t actual_ldd = bgmmc.M == 1
             ? bgmmc.N
             : dst_d.blocking_desc().strides[bgmmc.ndims - 2];
     // Loop-invariant across every blocking candidate, so set it once here.
@@ -2927,7 +2927,11 @@ void init_aux_values(brgemm_matmul_conf_t &bgmmc,
                                           wei_stride / factor)
                 * factor;
     } else if (bgmmc.transposed_B) {
-        if (wei_d.strides()[bgmmc.ndims - 1] == 1) {
+        // A transposed md has an N stride of at least K, so an N stride of 1
+        // means the md is actually plain and only got a transposed tag forced
+        // (e.g. N == 1). K == 1 is the exception: the md is both plain and
+        // transposed and its N stride is the valid transposed stride.
+        if (wei_d.strides()[bgmmc.ndims - 1] == 1 && bgmmc.K > 1) {
             const auto b_stride_elems
                     = bgmmc.req_wei_vnni_downconvert ? bgmmc.LDB : bgmmc.N;
             bgmmc.copy_B_wei_stride = b_stride_elems * bgmmc.b_dt_sz;

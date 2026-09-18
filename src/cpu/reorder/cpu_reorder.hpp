@@ -99,6 +99,7 @@ extern const impl_list_map_t &regular_s8_impl_list_map();
 extern const impl_list_map_t &regular_u8_impl_list_map();
 extern const impl_list_map_t &regular_s4_impl_list_map();
 extern const impl_list_map_t &regular_u4_impl_list_map();
+extern const impl_list_map_t &regular_u2_impl_list_map();
 
 /* conv reorders w/ compensation */
 extern const impl_list_map_t &comp_f32_s8_impl_list_map();
@@ -108,7 +109,7 @@ extern const impl_list_map_t &comp_s8_s8_impl_list_map();
 // clang-format off
 
 #define REG_SR(idt, ifmt, odt, ofmt, ...) \
-    impl_list_item_t(impl_list_item_t::reorder_type_deduction_helper_t< \
+    impl_list_item_t(impl_list_item_t::type_deduction_helper_t< \
             simple_reorder_t<idt, ifmt, odt, ofmt, __VA_ARGS__>::pd_t>()),
 
 #define REG_SR_BIDIR(idt, ifmt, odt, ofmt) \
@@ -140,8 +141,8 @@ extern const impl_list_map_t &comp_s8_s8_impl_list_map();
 #endif
 
 #define CPU_REORDER_INSTANCE(...) \
-    impl_list_item_t(impl_list_item_t::reorder_type_deduction_helper_t< \
-            __VA_ARGS__::pd_t>()),
+    impl_list_item_t( \
+            impl_list_item_t::type_deduction_helper_t<__VA_ARGS__::pd_t>()),
 
 } // namespace cpu
 } // namespace impl

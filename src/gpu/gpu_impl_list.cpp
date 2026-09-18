@@ -47,6 +47,7 @@ const impl_list_item_t *gpu_impl_list_t::get_implementation_list(
             CASE(pooling);
             CASE(prelu);
             CASE(reduction);
+            CASE(reorder);
             CASE(resampling);
             CASE(rnn);
             CASE(sdpa);
@@ -65,11 +66,6 @@ const impl_list_item_t *gpu_impl_list_t::get_concat_implementation_list() {
 
 const impl_list_item_t *gpu_impl_list_t::get_sum_implementation_list() {
     return get_sum_impl_list();
-}
-
-const impl_list_item_t *gpu_impl_list_t::get_reorder_implementation_list(
-        const memory_desc_t *src_md, const memory_desc_t *dst_md) {
-    return get_reorder_impl_list(src_md, dst_md);
 }
 
 } // namespace gpu
